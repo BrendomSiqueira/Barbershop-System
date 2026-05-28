@@ -4,6 +4,13 @@ import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from './firebase-applet-config.json';
 
 // Initialize Firebase SDK
+console.log('Firebase Init Config:', {
+  projectId: firebaseConfig.projectId,
+  authDomain: firebaseConfig.authDomain,
+  hasApiKey: !!firebaseConfig.apiKey,
+  apiKeyLength: firebaseConfig.apiKey?.length,
+  apiKeyStart: firebaseConfig.apiKey?.slice(0, 5)
+});
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth();
