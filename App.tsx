@@ -680,6 +680,8 @@ const App: React.FC = () => {
       console.error("Google Auth Error:", err);
       if (err.code === 'auth/account-exists-with-different-credential') {
         setAuthError("Já existe uma conta com este e-mail usando senha. Entre com seu e-mail e senha primeiro e depois vincule o Google nas configurações do perfil.");
+      } else if (err.code?.includes('api-key-not-valid') || err.message?.includes('api-key-not-valid') || err.code === 'auth/api-key-not-valid') {
+        setAuthError("Erro de Chave de API: O Firebase acabou de ser provisionado e a chave de API leva de 2 a 5 minutos para se propagar nos servidores globais do Google. Por favor, aguarde alguns instantes e faça uma atualização forçada da página (Ctrl+Shift+R ou Cmd+Shift+R) para renovar a conexão.");
       } else {
         setAuthError(`Erro ao entrar com Google: ${err.code || 'Erro desconhecido'}`);
       }
@@ -1214,6 +1216,8 @@ const App: React.FC = () => {
       } else if (err.code === 'auth/operation-not-allowed') {
         setAuthError("Erro de Configuração no Firebase: O método de login por E-mail/Senha está desativado.");
         setShowEmailAuthGuide(true);
+      } else if (err.code?.includes('api-key-not-valid') || err.message?.includes('api-key-not-valid') || err.code === 'auth/api-key-not-valid') {
+        setAuthError("Erro de Chave de API: O Firebase acabou de ser provisionado e a chave de API leva de 2 a 5 minutos para se propagar nos servidores globais do Google. Por favor, aguarde alguns instantes e faça uma atualização forçada da página (Ctrl+Shift+R ou Cmd+Shift+R) para renovar a conexão.");
       } else {
         setAuthError(`Erro ao autenticar: ${err.code || 'Erro desconhecido'}. Verifique sua conexão e tente novamente.`);
       }
