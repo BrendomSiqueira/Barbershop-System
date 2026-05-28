@@ -161,6 +161,32 @@ const LogoElite = ({ className = "h-12 w-12" }: { className?: string }) => (
   </div>
 );
 
+const WoodenMouseSignature = ({ minimal = false }: { minimal?: boolean }) => {
+  if (minimal) {
+    return (
+      <div className="mt-auto pt-4 border-t border-white/5 flex justify-center pb-2 select-none">
+        <div className="p-1 px-1.5 bg-amber-500/5 rounded-lg border border-amber-500/10 text-[#E1B15F] flex items-center justify-center" title="Produzido por Wooden Mouse">
+          <Sparkles size={10} className="animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-auto pt-4 border-t border-white/5 flex flex-col items-center justify-center text-center pb-2 select-none">
+      <p className="text-[7px] font-black tracking-[0.2em] text-slate-600 uppercase leading-none mb-1">
+        PRODUZIDO POR
+      </p>
+      <div className="flex items-center gap-1.5 text-amber-500 hover:text-amber-400 transition-colors cursor-default">
+        <Sparkles size={10} className="text-amber-500 animate-pulse" />
+        <span className="text-[9px] font-black uppercase tracking-widest text-[#E1B15F] drop-shadow-[0_0_10px_rgba(225,177,95,0.2)]">
+          WOODEN MOUSE
+        </span>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(true);
@@ -2460,6 +2486,9 @@ const App: React.FC = () => {
               )}
             </form>
           )}
+          <div className="pt-4 border-t border-white/5 mt-8">
+            <WoodenMouseSignature />
+          </div>
         </div>
       </div>
     );
@@ -2678,6 +2707,9 @@ const App: React.FC = () => {
               </div>
             </form>
           </Card>
+          <div className="pt-2">
+            <WoodenMouseSignature />
+          </div>
         </div>
       </div>
     );
@@ -3016,6 +3048,7 @@ const App: React.FC = () => {
               </button>
             ))}
           </nav>
+          <WoodenMouseSignature minimal={!isSidebarOpen} />
         </div>
       </aside>
 
