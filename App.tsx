@@ -162,12 +162,20 @@ const LogoElite = ({ className = "h-12 w-12" }: { className?: string }) => (
 );
 
 const WoodenMouseSignature = ({ minimal = false }: { minimal?: boolean }) => {
+  const url = "https://www.instagram.com/wooden.mouse.tec?igsh=dXpxamc3bzFtYmg3&utm_source=qr";
+
   if (minimal) {
     return (
       <div className="mt-auto pt-4 border-t border-white/5 flex justify-center pb-2 select-none">
-        <div className="p-1 px-1.5 bg-amber-500/5 rounded-lg border border-amber-500/10 text-[#E1B15F] flex items-center justify-center" title="Produzido por Wooden Mouse">
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="p-1 px-1.5 bg-amber-500/5 rounded-lg border border-amber-500/10 text-[#E1B15F] flex items-center justify-center cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/30 hover:scale-110 active:scale-95 transition-all"
+          title="Produzido por Wooden Mouse - Ir para o Instagram"
+        >
           <Sparkles size={10} className="animate-pulse" />
-        </div>
+        </a>
       </div>
     );
   }
@@ -177,12 +185,18 @@ const WoodenMouseSignature = ({ minimal = false }: { minimal?: boolean }) => {
       <p className="text-[7px] font-black tracking-[0.2em] text-slate-600 uppercase leading-none mb-1">
         PRODUZIDO POR
       </p>
-      <div className="flex items-center gap-1.5 text-amber-500 hover:text-amber-400 transition-colors cursor-default">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-1.5 text-[#E1B15F] hover:text-amber-400 hover:scale-105 active:scale-95 transition-all duration-250 cursor-pointer"
+        title="Ver Instagram da Wooden Mouse"
+      >
         <Sparkles size={10} className="text-amber-500 animate-pulse" />
         <span className="text-[9px] font-black uppercase tracking-widest text-[#E1B15F] drop-shadow-[0_0_10px_rgba(225,177,95,0.2)]">
           WOODEN MOUSE
         </span>
-      </div>
+      </a>
     </div>
   );
 };
