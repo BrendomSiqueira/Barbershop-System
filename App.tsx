@@ -22,7 +22,23 @@ import { Button, Input, Card, Badge } from './components/UI';
 import { StorageService } from './services/storage';
 import { GeminiService } from './services/gemini';
 import { Client, Service, Appointment, AppointmentStatus, UserSession, Tab, Material, Drink, Sale } from './types';
-import { auth, db, OperationType, handleFirestoreError } from './firebase';
+import { 
+  auth, 
+  db, 
+  OperationType, 
+  handleFirestoreError,
+  doc, 
+  setDoc, 
+  getDoc, 
+  onSnapshot, 
+  collection, 
+  query, 
+  where, 
+  deleteDoc,
+  updateDoc,
+  getDocFromServer,
+  setSimulatedUser
+} from './firebase';
 import { 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
@@ -36,18 +52,6 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential
 } from 'firebase/auth';
-import { 
-  doc, 
-  setDoc, 
-  getDoc, 
-  onSnapshot, 
-  collection, 
-  query, 
-  where, 
-  deleteDoc,
-  updateDoc,
-  getDocFromServer
-} from 'firebase/firestore';
 
 interface BalanceAdjustment {
   id: string;
@@ -59,7 +63,12 @@ interface BalanceAdjustment {
 const DEFAULT_SERVICES: Service[] = [
   { id: '1', name: 'Corte Social', price: 35, duration: 30 },
   { id: '2', name: 'Degradê Especial', price: 45, duration: 45 },
-  { id: '3', name: 'Barba Terápia', price: 25, duration: 25 },
+  { id: '3', name: 'Barba Terapia', price: 25, duration: 25 },
+  { id: '4', name: 'Corte + Barba (Combo)', price: 55, duration: 60 },
+  { id: '5', name: 'Sobrancelha', price: 15, duration: 15 },
+  { id: '6', name: 'Pigmentação Cabelo/Barba', price: 30, duration: 30 },
+  { id: '7', name: 'Selagem Térmica', price: 80, duration: 90 },
+  { id: '8', name: 'Luzes / Platinado', price: 90, duration: 120 },
 ];
 
 const DEFAULT_PROFILE_IMG = "https://images.unsplash.com/photo-1621605815971-fbc98d665033?q=80&w=400&h=400&auto=format&fit=crop";
@@ -76,8 +85,8 @@ const LogoElite = ({ className = "h-12 w-12" }: { className?: string }) => (
 
 const App: React.FC = () => {
   const [session, setSession] = useState<UserSession | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isAuthReady, setIsAuthReady] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login');
   const [authError, setAuthError] = useState<string | null>(null);
   const [showEmailAuthGuide, setShowEmailAuthGuide] = useState(false);
@@ -90,6 +99,9 @@ const App: React.FC = () => {
   
   const [clients, setClients] = useState<Client[]>([]);
   const [services, setServices] = useState<Service[]>(DEFAULT_SERVICES);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+  const [editingServiceName, setEditingServiceName] = useState("");
+  const [editingServicePrice, setEditingServicePrice] = useState<number>(0);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [drinks, setDrinks] = useState<Drink[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -276,7 +288,7 @@ const App: React.FC = () => {
 
     const userId = auth.currentUser.uid;
 
-    const unsubProfile = onSnapshot(doc(db, 'users', userId), (docSnap) => {
+    const unsubProfile = onSnapshot(doc(db, 'users', userId), async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setSession({
@@ -297,6 +309,22 @@ const App: React.FC = () => {
               showToast("Dados locais sincronizados com sucesso!", "info");
             }
           });
+        }
+      } else {
+        try {
+          await setDoc(doc(db, 'users', userId), {
+            username: 'Matheus Farias',
+            shopName: 'Barbearia Matheus Farias',
+            phone: '',
+            profileImage: DEFAULT_PROFILE_IMG,
+            monthlyGoal: 5000,
+            marketing_msg: "",
+            campaign_goal: "",
+            privacy_mode: false,
+            migrated: true
+          });
+        } catch (err) {
+          console.error("Erro ao inicializar perfil de usuário:", err);
         }
       }
     }, (err) => handleFirestoreError(err, OperationType.GET, `users/${userId}`));
@@ -426,21 +454,7 @@ const App: React.FC = () => {
   }, [appointments, sales, adjustments, session?.monthlyGoal, reportMonth]);
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      StorageService.remove('session');
-      setClients([]);
-      setServices(DEFAULT_SERVICES);
-      setAppointments([]);
-      setAdjustments([]);
-      setDrinks([]);
-      setSales([]);
-      setSession(null);
-      setIsAuthenticated(false);
-      setActiveTab(Tab.Dashboard);
-    } catch (err) {
-      showToast("Erro ao sair", "error");
-    }
+    showToast("Acesso Master ativo - Login desativado", "info");
   };
 
   const handleExportData = () => {
@@ -470,6 +484,116 @@ const App: React.FC = () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     showToast("Backup exportado com sucesso!");
+  };
+
+  const handleExportExcelYear = () => {
+    if (!session) return;
+    const selectedYear = reportMonth.split('-')[0];
+
+    const formatBRLDecimal = (num: number) => {
+      return num.toFixed(2).replace('.', ',');
+    };
+
+    const compApts = appointments.filter(a => a.completed && a.date.startsWith(selectedYear));
+    const yearSales = sales.filter(s => s.date.startsWith(selectedYear));
+    const yearAdjustments = adjustments.filter(a => a.date.startsWith(selectedYear));
+
+    // Calc overall totals
+    const servicesTotal = compApts.filter(a => a.paid).reduce((acc, a) => acc + a.finalPrice, 0);
+    const salesTotal = yearSales.reduce((acc, s) => acc + s.price, 0);
+    const adjustmentsTotal = yearAdjustments.reduce((acc, a) => acc + a.amount, 0);
+    const grandTotal = servicesTotal + salesTotal + adjustmentsTotal;
+
+    const csvLines: string[] = [];
+
+    // Header
+    csvLines.push(`RELATÓRIO DE DESEMPENHO ANUAL - BARBEARIA MATHEUS FARIAS`);
+    csvLines.push(`Ano de Referência:;${selectedYear}`);
+    csvLines.push(`Gerado em:;${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`);
+    csvLines.push(``);
+
+    // Section 1: Summary Cards
+    csvLines.push(`*** RESUMO FINANCEIRO ANUAL ***`);
+    csvLines.push(`Indicador;Valor (R$)`);
+    csvLines.push(`Faturamento de Serviços;${formatBRLDecimal(servicesTotal)}`);
+    csvLines.push(`Vendas de Produtos;${formatBRLDecimal(salesTotal)}`);
+    csvLines.push(`Ajustes de Caixa;${formatBRLDecimal(adjustmentsTotal)}`);
+    csvLines.push(`FATURAMENTO REAL TOTAL COMBINADO;${formatBRLDecimal(grandTotal)}`);
+    csvLines.push(`Total de Cortes Concluídos;${compApts.length}`);
+    csvLines.push(``);
+
+    // Section 2: Month-by-month
+    csvLines.push(`*** DESEMPENHO MENSAL EM ${selectedYear} ***`);
+    csvLines.push(`Mês;Cortes Realizados;Serviços (R$);Vendas (R$);Ajustes (R$);Total Mensal (R$)`);
+    
+    const monthsNames = [
+      "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
+      "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+    ];
+
+    monthsNames.forEach((monthName, idx) => {
+      const monthPrefix = `${selectedYear}-${(idx + 1).toString().padStart(2, '0')}`;
+      const mCuts = compApts.filter(a => a.date.startsWith(monthPrefix));
+      const mServices = mCuts.filter(a => a.paid).reduce((acc, a) => acc + a.finalPrice, 0);
+      const mSales = yearSales.filter(s => s.date.startsWith(monthPrefix)).reduce((acc, s) => acc + s.price, 0);
+      const mAdjustments = yearAdjustments.filter(a => a.date.startsWith(monthPrefix)).reduce((acc, a) => acc + a.amount, 0);
+      const mTotal = mServices + mSales + mAdjustments;
+
+      csvLines.push(`${monthName};${mCuts.length};${formatBRLDecimal(mServices)};${formatBRLDecimal(mSales)};${formatBRLDecimal(mAdjustments)};${formatBRLDecimal(mTotal)}`);
+    });
+    csvLines.push(``);
+
+    // Section 3: Appointment details
+    csvLines.push(`*** DETALHAMENTO DE ATENDIMENTOS NO ANO ***`);
+    csvLines.push(`Data;Horário;Cliente;Telefone;Serviço;Valor Original (R$);Desconto/Acréscimo (R$);Pago (R$);Status de Pagamento`);
+
+    compApts.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)).forEach(apt => {
+      // Find client/service names
+      const serviceName = services.find(s => s.id === apt.serviceId)?.name || "Serviço Não Identificado";
+      const originalPrice = services.find(s => s.id === apt.serviceId)?.price || apt.finalPrice;
+      const clientName = clients.find(c => c.id === apt.clientId)?.name || apt.clientName || "Cliente Avulso";
+      const clientPhone = clients.find(c => c.id === apt.clientId)?.phone || apt.clientPhone || "-";
+      
+      const formattedDate = apt.date.split('-').reverse().join('/');
+      const diff = apt.finalPrice - originalPrice;
+      const diffStr = diff === 0 ? "0,00" : formatBRLDecimal(diff);
+
+      csvLines.push(`${formattedDate};${apt.time};${clientName?.replace(/;/g, ',')};${clientPhone?.replace(/;/g, ',')};${serviceName?.replace(/;/g, ',')};${formatBRLDecimal(originalPrice)};${diffStr};${formatBRLDecimal(apt.finalPrice)};${apt.paid ? "PAGO" : "PENDENTE"}`);
+    });
+    csvLines.push(``);
+
+    // Section 4: Sales list
+    csvLines.push(`*** DETALHAMENTO DE VENDAS DE PRODUTOS NO ANO ***`);
+    csvLines.push(`Data;Produto/Item;Valor (R$)`);
+    
+    yearSales.sort((a, b) => a.date.localeCompare(b.date)).forEach(sale => {
+      const formattedDate = sale.date.includes('T') ? sale.date.split('T')[0].split('-').reverse().join('/') : sale.date.split('-').reverse().join('/');
+      csvLines.push(`${formattedDate};${sale.itemName?.replace(/;/g, ',')};${formatBRLDecimal(sale.price)}`);
+    });
+    csvLines.push(``);
+
+    // Section 5: Adjustments list
+    csvLines.push(`*** DETALHAMENTO DE AJUSTES DE CAIXA NO ANO ***`);
+    csvLines.push(`Data;Descrição do Ajuste;Valor do Ajuste (R$);Tipo`);
+    
+    yearAdjustments.sort((a, b) => a.date.localeCompare(b.date)).forEach(adj => {
+      const formattedDate = adj.date.split('-').reverse().join('/');
+      const type = adj.amount >= 0 ? "ENTRADA" : "SAÍDA";
+      csvLines.push(`${formattedDate};${adj.reason?.replace(/;/g, ',')};${formatBRLDecimal(adj.amount)};${type}`);
+    });
+
+    // Generate CSV content with UTF-8 BOM
+    const csvContent = "\uFEFF" + csvLines.join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Relatorio_Anual_MF_${selectedYear}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Relatório Excel do ano ${selectedYear} exportado com sucesso!`);
   };
 
   const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -686,6 +810,17 @@ const App: React.FC = () => {
         setAuthError(`Erro ao entrar com Google: ${err.code || 'Erro desconhecido'}`);
       }
     }
+  };
+
+  const handleOfflineLogin = () => {
+    setSimulatedUser({
+      uid: 'offline_demo',
+      email: 'admin@barbershop.com',
+      displayName: 'Matheus Farias (Modo Admin Local)'
+    });
+    setAuthError(null);
+    setShowEmailAuthGuide(false);
+    showToast("Acessando com o Modo Demonstrativo Local!", "info");
   };
 
   const handleLinkGoogle = async () => {
@@ -1258,6 +1393,25 @@ const App: React.FC = () => {
     }
   };
 
+  const handleEditServiceSave = async (serviceId: string) => {
+    if (!auth.currentUser) return;
+    const userId = auth.currentUser.uid;
+    if (!editingServiceName.trim()) {
+      showToast("O nome do serviço não pode ser vazio!", "error");
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'users', userId, 'services', serviceId), {
+        name: editingServiceName.trim(),
+        price: Number(editingServicePrice)
+      });
+      setEditingServiceId(null);
+      showToast("Serviço atualizado!");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${userId}/services/${serviceId}`);
+    }
+  };
+
   const handleRequestAction = async (requestId: string, action: 'accept' | 'reject') => {
     if (!auth.currentUser) return;
     const userId = auth.currentUser.uid;
@@ -1690,6 +1844,16 @@ const App: React.FC = () => {
               {authMode === 'login' ? 'ACESSAR PAINEL' : authMode === 'register' ? 'FINALIZAR CADASTRO' : 'CONFIRMAR NOVA SENHA'}
             </Button>
 
+            {authMode === 'login' && (
+              <Button 
+                type="button" 
+                className="w-full py-4 mt-3 bg-elite-cyan-950/40 text-elite-cyan-400 hover:bg-elite-cyan-900/40 border border-elite-cyan-500/20 font-black tracking-widest uppercase text-[10px] shadow-[0_0_15px_rgba(6,182,212,0.1)]"
+                onClick={handleOfflineLogin}
+              >
+                ⚡ ENTRAR COM MODO DEMONSTRATIVO LOCAL
+              </Button>
+            )}
+
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-slate-800"></div>
@@ -1904,10 +2068,6 @@ const App: React.FC = () => {
               </button>
             ))}
           </nav>
-          <button onClick={handleLogout} className="mt-6 flex items-center gap-3 px-4 py-3 text-[10px] font-black uppercase text-red-500 hover:bg-red-500/10 rounded-xl transition-all">
-            <LogOut size={16} />
-            {isSidebarOpen && <span>Sair</span>}
-          </button>
         </div>
       </aside>
 
@@ -2602,14 +2762,14 @@ const App: React.FC = () => {
                            <div>
                               <p className="text-[10px] font-black text-white uppercase tracking-widest leading-none mb-1">Google</p>
                               <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
-                                 {auth.currentUser?.providerData.some(p => p.providerId === 'google.com') 
+                                 {(auth.currentUser?.providerData || []).some(p => p.providerId === 'google.com') 
                                    ? 'CONTA VINCULADA' 
                                    : 'NÃO VINCULADO'}
                               </p>
                            </div>
                         </div>
                         
-                        {!auth.currentUser?.providerData.some(p => p.providerId === 'google.com') ? (
+                        {!(auth.currentUser?.providerData || []).some(p => p.providerId === 'google.com') ? (
                            <Button variant="ghost" className="text-[10px] border border-white/10" onClick={handleLinkGoogle}>
                               VINCULAR AGORA
                            </Button>
@@ -2677,13 +2837,10 @@ const App: React.FC = () => {
                         <Badge variant="success" className="text-[8px]">ESTÁVEL</Badge>
                      </div>
                      
-                     <Button 
-                        variant="ghost" 
-                        className="w-full border border-red-500/20 text-red-500 hover:bg-red-500/10 flex gap-2"
-                        onClick={() => signOut(auth)}
-                     >
-                        <LogOut size={16}/> SAIR DA CONTA
-                     </Button>
+                     <div className="p-4 bg-elite-cyan-500/5 border border-elite-cyan-500/10 rounded-2xl text-center">
+                        <p className="text-[9px] font-black uppercase text-elite-cyan-400 tracking-wider">Acesso Master Ativado</p>
+                        <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">Este terminal está configurado para acesso total permanente sem necessidade de logins.</p>
+                     </div>
                   </div>
                </Card>
             </div>
@@ -2764,7 +2921,17 @@ const App: React.FC = () => {
                         <p className="text-xs font-bold text-white uppercase">Selecione o período de interesse</p>
                      </div>
                   </div>
-                  <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="bg-slate-950 border border-white/10 rounded-xl px-6 py-3 text-white text-xs font-black uppercase outline-none focus:border-elite-red-500 transition-all"/>
+                  <div className="flex items-center gap-3 flex-wrap">
+                     <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="bg-slate-950 border border-white/10 rounded-xl px-6 py-3 text-white text-xs font-black uppercase outline-none focus:border-elite-red-500 transition-all"/>
+                     <button 
+                        onClick={handleExportExcelYear} 
+                        className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 px-6 py-3 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-emerald-500/10"
+                        title="Exportar Relatório Excel/CSV Completo do Ano de Referência"
+                     >
+                        <Download size={14}/>
+                        Exportar Excel Anual ({reportMonth.split('-')[0]})
+                     </button>
+                  </div>
                </div>
 
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -2829,24 +2996,94 @@ const App: React.FC = () => {
                   </form>
                </Card>
                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {services.map(s => (
-                    <div key={s.id} className="bg-slate-900/40 border border-white/5 p-8 rounded-[40px] hover:border-elite-red-500/30 transition-all shadow-xl group">
-                       <div className="flex justify-between items-start mb-2">
-                          <h4 className="text-lg font-black text-white uppercase tracking-tight">{s.name}</h4>
-                          <button onClick={async () => {
-                             if (!auth.currentUser) return;
-                             const userId = auth.currentUser.uid;
-                             try {
-                               await deleteDoc(doc(db, 'users', userId, 'services', s.id));
-                               showToast("Serviço removido");
-                             } catch (err) {
-                               handleFirestoreError(err, OperationType.DELETE, `users/${userId}/services/${s.id}`);
-                             }
-                           }} className="text-slate-700 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
-                       </div>
-                       <p className="text-3xl font-black text-elite-cyan-400">{formatCurrency(s.price)}</p>
-                    </div>
-                  ))}
+                  {services.map(s => {
+                    const isEditing = editingServiceId === s.id;
+                    if (isEditing) {
+                      return (
+                        <div key={s.id} className="bg-slate-900/60 border border-elite-cyan-500/20 p-8 rounded-[40px] transition-all shadow-xl animate-in zoom-in duration-200">
+                           <div className="space-y-4">
+                              <div>
+                                 <label className="text-[10px] font-black tracking-widest text-elite-cyan-400 uppercase block mb-2">Editar Nome</label>
+                                 <input 
+                                    type="text" 
+                                    className="w-full bg-slate-950 border border-white/10 rounded-2xl p-4 text-xs font-bold text-white uppercase focus:border-elite-cyan-500 focus:ring-1 focus:ring-elite-cyan-500 outline-none transition-all"
+                                    value={editingServiceName}
+                                    onChange={(e) => setEditingServiceName(e.target.value)}
+                                    placeholder="Ex: Corte Degradê"
+                                 />
+                              </div>
+                              <div>
+                                 <label className="text-[10px] font-black tracking-widest text-elite-cyan-400 uppercase block mb-2">Editar Valor (R$)</label>
+                                 <input 
+                                    type="number" 
+                                    step="0.01"
+                                    className="w-full bg-slate-950 border border-white/10 rounded-2xl p-4 text-xs font-bold text-white focus:border-elite-cyan-500 focus:ring-1 focus:ring-elite-cyan-500 outline-none transition-all"
+                                    value={editingServicePrice}
+                                    onChange={(e) => setEditingServicePrice(Number(e.target.value))}
+                                    placeholder="Ex: 40.00"
+                                 />
+                              </div>
+                              <div className="flex gap-2 pt-2">
+                                 <button 
+                                    type="button" 
+                                    onClick={() => handleEditServiceSave(s.id)} 
+                                    className="flex-1 bg-elite-cyan-500 hover:bg-elite-cyan-600 text-slate-950 font-black text-[10px] uppercase py-3 rounded-2xl flex items-center justify-center gap-1 transition-all"
+                                 >
+                                    <Check size={14}/> Salvar
+                                 </button>
+                                 <button 
+                                    type="button" 
+                                    onClick={() => setEditingServiceId(null)} 
+                                    className="flex-1 bg-white/5 hover:bg-white/10 text-white font-black text-[10px] uppercase py-3 rounded-2xl flex items-center justify-center gap-1 transition-all"
+                                 >
+                                    <X size={14}/> Cancelar
+                                 </button>
+                              </div>
+                           </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={s.id} className="bg-slate-900/40 border border-white/5 p-8 rounded-[40px] hover:border-elite-red-500/30 transition-all shadow-xl group flex flex-col justify-between">
+                         <div>
+                            <div className="flex justify-between items-start mb-2">
+                               <h4 className="text-lg font-black text-white uppercase tracking-tight">{s.name}</h4>
+                               <div className="flex gap-3 items-center opacity-40 group-hover:opacity-100 transition-opacity">
+                                  <button 
+                                    onClick={() => {
+                                       setEditingServiceId(s.id);
+                                       setEditingServiceName(s.name);
+                                       setEditingServicePrice(s.price);
+                                    }} 
+                                    className="text-slate-400 hover:text-elite-cyan-400 transition-colors"
+                                    title="Editar serviço"
+                                  >
+                                     <Edit3 size={16}/>
+                                  </button>
+                                  <button 
+                                    onClick={async () => {
+                                       if (!auth.currentUser) return;
+                                       const userId = auth.currentUser.uid;
+                                       try {
+                                         await deleteDoc(doc(db, 'users', userId, 'services', s.id));
+                                          showToast("Serviço removido");
+                                       } catch (err) {
+                                         handleFirestoreError(err, OperationType.DELETE, `users/${userId}/services/${s.id}`);
+                                       }
+                                    }} 
+                                    className="text-slate-400 hover:text-red-500 transition-colors"
+                                    title="Remover serviço"
+                                  >
+                                     <Trash2 size={16}/>
+                                  </button>
+                               </div>
+                            </div>
+                            <p className="text-3xl font-black text-elite-cyan-400">{formatCurrency(s.price)}</p>
+                         </div>
+                      </div>
+                    );
+                  })}
                </div>
             </div>
           )}
