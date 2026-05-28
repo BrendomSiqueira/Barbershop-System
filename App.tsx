@@ -2588,22 +2588,31 @@ const App: React.FC = () => {
 
   if (!isAuthenticated)
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950">
-        <div className="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-500">
+      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950 relative overflow-hidden">
+        {/* Ambient luxury light orbs for a premium deep slate aesthetic with brand red & warm gold glows */}
+        <div className="absolute top-[10%] left-[10%] w-[350px] h-[350px] bg-elite-red-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse duration-[8000ms]" />
+        <div className="absolute bottom-[10%] right-[10%] w-[350px] h-[350px] bg-[#E1B15F]/5 rounded-full blur-[120px] pointer-events-none" />
+        
+        <div className="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-500 relative z-10">
           <div className="text-center">
-            <LogoElite className="mx-auto h-24 w-24 mb-4" />
+            <div className="relative inline-block mb-3">
+              <LogoElite className="mx-auto h-24 w-24 relative z-10" />
+              <div className="absolute inset-0 bg-elite-red-500/20 rounded-full blur-md opacity-30 scale-110" />
+            </div>
+            
             <h2 className="text-3xl font-black text-white uppercase tracking-tighter italic leading-none">
               Barbershop
               <br />
-              <span className="text-elite-red-500 text-4xl">
+              <span className="text-elite-red-500 text-4xl font-extrabold tracking-tight drop-shadow-[0_4px_12px_rgba(239,68,68,0.2)]">
                 Matheus Farias
               </span>
             </h2>
           </div>
-          <Card className="glass-card">
-            <form className="space-y-4" onSubmit={handleAuth}>
+          
+          <Card className="glass-card border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-[24px]">
+            <form className="space-y-5" onSubmit={handleAuth}>
               {authError && (
-                <p className="text-[10px] text-red-500 font-black uppercase text-center bg-red-500/10 p-2 rounded-lg">
+                <p className="text-[10px] text-red-500 font-black uppercase text-center bg-red-500/10 p-2.5 rounded-xl border border-red-500/20">
                   {authError}
                 </p>
               )}
@@ -2631,7 +2640,7 @@ const App: React.FC = () => {
                       Clique em{" "}
                       <strong className="text-white">
                         Build &gt; Authentication
-                      </strong>{" "}
+                    </strong>{" "}
                       no menu esquerdo.
                     </li>
                     <li>
@@ -2643,7 +2652,7 @@ const App: React.FC = () => {
                       Clique em{" "}
                       <strong className="text-white">
                         Adicionar novo provedor
-                      </strong>{" "}
+                    </strong>{" "}
                       e selecione{" "}
                       <strong className="text-white">E-mail/Senha</strong>.
                     </li>
@@ -2681,8 +2690,7 @@ const App: React.FC = () => {
                 label="E-MAIL OU USUÁRIO"
                 name="email"
                 type="text"
-                placeholder="seu@email.com ou Matheus"
-                defaultValue="Matheus"
+                placeholder="Insira seu e-mail ou usuário"
                 required
               />
 
@@ -2690,12 +2698,11 @@ const App: React.FC = () => {
                 label={authMode === "reset" ? "NOVA SENHA" : "SENHA"}
                 name="password"
                 type="password"
-                placeholder="••••••••"
-                defaultValue={authMode === "reset" ? "" : "372087"}
+                placeholder="Digite sua senha"
                 required
               />
 
-              <Button type="submit" className="w-full py-4">
+              <Button type="submit" className="w-full py-4 tracking-widest text-xs shadow-xl active:scale-[0.98] transition-transform">
                 {authMode === "login"
                   ? "ACESSAR PAINEL"
                   : authMode === "register"
@@ -2703,24 +2710,14 @@ const App: React.FC = () => {
                     : "CONFIRMAR NOVA SENHA"}
               </Button>
 
-              {authMode === "login" && (
-                <Button
-                  type="button"
-                  className="w-full py-4 mt-3 bg-elite-cyan-950/40 text-elite-cyan-400 hover:bg-elite-cyan-900/40 border border-elite-cyan-500/20 font-black tracking-widest uppercase text-[10px] shadow-[0_0_15px_rgba(6,182,212,0.1)]"
-                  onClick={handleOfflineLogin}
-                >
-                  ⚡ ENTRAR COM MODO DEMONSTRATIVO LOCAL
-                </Button>
-              )}
-
-              <div className="flex flex-col gap-3 mt-4">
+              <div className="flex flex-col gap-3 mt-4 pt-2 border-t border-white/5">
                 <button
                   type="button"
                   onClick={() => {
                     setAuthMode(authMode === "login" ? "register" : "login");
                     setAuthError(null);
                   }}
-                  className="w-full text-[10px] text-slate-500 font-black uppercase tracking-widest hover:text-elite-red-500 transition-all"
+                  className="w-full text-[10px] text-slate-400 hover:text-[#E1B15F] font-black uppercase tracking-widest transition-all cursor-pointer"
                 >
                   {authMode === "login"
                     ? "CRIAR NOVA CONTA"
@@ -2734,7 +2731,7 @@ const App: React.FC = () => {
                       setAuthMode("reset");
                       setAuthError(null);
                     }}
-                    className="w-full text-[10px] text-slate-700 font-black uppercase tracking-widest hover:text-elite-cyan-500 transition-all"
+                    className="w-full text-[10px] text-slate-500 hover:text-white font-black uppercase tracking-widest transition-all cursor-pointer"
                   >
                     ESQUECI MINHA SENHA
                   </button>
