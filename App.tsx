@@ -266,21 +266,38 @@ const App: React.FC = () => {
     
     const timeoutId = setTimeout(async () => {
       try {
-        await updateDoc(doc(db, 'users', userId), {
+        await setDoc(doc(db, 'users', userId), {
+          username: session.username || "Matheus Farias",
           shopName: session.shopName || "",
           phone: session.phone || "",
+          profileImage: session.profileImage || DEFAULT_PROFILE_IMG,
           monthlyGoal: session.monthlyGoal || 0,
           businessHours: session.businessHours || null,
           unavailableSlots: session.unavailableSlots || [],
+          marketing_msg: marketingMsg,
+          campaign_goal: campaignGoal,
+          privacy_mode: isPrivacyMode,
           updatedAt: new Date().toISOString()
-        });
+        }, { merge: true });
       } catch (err) {
         console.error("Erro ao salvar perfil automaticamente:", err);
       }
     }, 1000);
 
     return () => clearTimeout(timeoutId);
-  }, [session?.shopName, session?.phone, session?.monthlyGoal, session?.businessHours, session?.unavailableSlots, isAuthenticated]);
+  }, [
+    session?.username,
+    session?.shopName,
+    session?.phone,
+    session?.profileImage,
+    session?.monthlyGoal,
+    session?.businessHours,
+    session?.unavailableSlots,
+    marketingMsg,
+    campaignGoal,
+    isPrivacyMode,
+    isAuthenticated
+  ]);
 
   // Data Listeners
   useEffect(() => {
@@ -296,7 +313,9 @@ const App: React.FC = () => {
           shopName: data.shopName,
           phone: data.phone,
           profileImage: data.profileImage,
-          monthlyGoal: data.monthlyGoal
+          monthlyGoal: data.monthlyGoal,
+          businessHours: data.businessHours || undefined,
+          unavailableSlots: data.unavailableSlots || []
         });
         setMarketingMsg(data.marketing_msg || "");
         setCampaignGoal(data.campaign_goal || "");
@@ -380,29 +399,7 @@ const App: React.FC = () => {
     };
   }, [isAuthenticated, auth.currentUser]);
 
-  // Save changes to Firestore (for simple settings) with debounce
-  useEffect(() => {
-    if (isAuthenticated && auth.currentUser && session) {
-      const userId = auth.currentUser.uid;
-      const timer = setTimeout(async () => {
-        try {
-          await setDoc(doc(db, 'users', userId), {
-            username: session.username,
-            shopName: session.shopName,
-            phone: session.phone,
-            profileImage: session.profileImage || DEFAULT_PROFILE_IMG,
-            monthlyGoal: session.monthlyGoal || 5000,
-            marketing_msg: marketingMsg,
-            campaign_goal: campaignGoal,
-            privacy_mode: isPrivacyMode
-          }, { merge: true });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
-        }
-      }, 1000); // 1s debounce
-      return () => clearTimeout(timer);
-    }
-  }, [marketingMsg, campaignGoal, isPrivacyMode, session, isAuthenticated]);
+
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
