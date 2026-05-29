@@ -162,8 +162,14 @@ const triggerListeners = (path: string) => {
   if (listeners[path]) {
     if (path.split('/').length === 2) {
       // Root user
-      const userData = localStorage.getItem('simdb_user_offline_demo');
-      const val = userData ? JSON.parse(rawOr(userData, '{}')) : getInitialUserData();
+      const uId = path.split('/')[1];
+      const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
+      const userData = localStorage.getItem(storageKey);
+      const val = userData ? JSON.parse(rawOr(userData, '{}')) : {
+        ...getInitialUserData(),
+        username: uId,
+        shopName: uId === 'matheus_farias' ? 'Barbearia Matheus Farias' : `Barbearia de ${uId.replace(/_/g, ' ')}`,
+      };
       listeners[path].forEach(cb => cb({
         exists: () => true,
         data: () => val
@@ -487,7 +493,22 @@ export function onSnapshot(reference: any, onNext: any, onError?: any) {
           if (snap.docs) {
             const collPath = customPath.replace(/\//g, '_');
             const docs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
-            saveMockCollectionData(collPath, docs);
+            
+            if (localStorage.getItem("simdb_has_local_changes") === "true") {
+              const localItems = getMockCollectionData(collPath);
+              const mergedDocs = [...localItems];
+              docs.forEach((cloudItem: any) => {
+                const idx = mergedDocs.findIndex(li => li.id === cloudItem.id);
+                if (idx >= 0) {
+                  mergedDocs[idx] = cloudItem;
+                } else {
+                  mergedDocs.push(cloudItem);
+                }
+              });
+              saveMockCollectionData(collPath, mergedDocs);
+            } else {
+              saveMockCollectionData(collPath, docs);
+            }
           }
         }
       }

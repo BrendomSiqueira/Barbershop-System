@@ -675,13 +675,13 @@ const App: React.FC = () => {
 
     const serviceMonthlyRev = compApts
       .filter((a) => a.date.startsWith(monthPrefix) && a.paid)
-      .reduce((acc, a) => acc + a.finalPrice, 0);
+      .reduce((acc, a) => acc + Number(a.finalPrice || 0), 0);
     const salesMonthlyRev = sales
       .filter((s) => s.date.startsWith(monthPrefix))
-      .reduce((acc, s) => acc + s.price, 0);
+      .reduce((acc, s) => acc + Number(s.price || 0), 0);
     const adjustmentsMonthly = adjustments
       .filter((a) => a.date.startsWith(monthPrefix))
-      .reduce((acc, a) => acc + a.amount, 0);
+      .reduce((acc, a) => acc + Number(a.amount || 0), 0);
     const monthlyRevTotal =
       serviceMonthlyRev + salesMonthlyRev + adjustmentsMonthly;
 
@@ -695,13 +695,13 @@ const App: React.FC = () => {
       const rev =
         compApts
           .filter((a) => a.date === ds && a.paid)
-          .reduce((acc, a) => acc + a.finalPrice, 0) +
+          .reduce((acc, a) => acc + Number(a.finalPrice || 0), 0) +
         sales
           .filter((s) => s.date === ds)
-          .reduce((acc, s) => acc + s.price, 0) +
+          .reduce((acc, s) => acc + Number(s.price || 0), 0) +
         adjustments
           .filter((a) => a.date === ds)
-          .reduce((acc, a) => acc + a.amount, 0);
+          .reduce((acc, a) => acc + Number(a.amount || 0), 0);
       return {
         name: d.toLocaleDateString("pt-BR", { weekday: "short" }),
         receita: Math.max(0, rev),
@@ -723,13 +723,13 @@ const App: React.FC = () => {
       dailyRev:
         compApts
           .filter((a) => a.date === today && a.paid)
-          .reduce((acc, a) => acc + a.finalPrice, 0) +
+          .reduce((acc, a) => acc + Number(a.finalPrice || 0), 0) +
         sales
           .filter((s) => s.date === today)
-          .reduce((acc, s) => acc + s.price, 0) +
+          .reduce((acc, s) => acc + Number(s.price || 0), 0) +
         adjustments
           .filter((a) => a.date === today)
-          .reduce((acc, a) => acc + a.amount, 0),
+          .reduce((acc, a) => acc + Number(a.amount || 0), 0),
       monthlyRev: monthlyRevTotal,
       todayCuts: compApts.filter((a) => a.date === today).length,
       weekCuts: compApts.filter((a) => new Date(a.date) >= sevenDaysAgo).length,
@@ -740,13 +740,13 @@ const App: React.FC = () => {
       reportRevenue:
         compApts
           .filter((a) => a.date.startsWith(reportMonth) && a.paid)
-          .reduce((acc, a) => acc + a.finalPrice, 0) +
+          .reduce((acc, a) => acc + Number(a.finalPrice || 0), 0) +
         sales
           .filter((s) => s.date.startsWith(reportMonth))
-          .reduce((acc, s) => acc + s.price, 0) +
+          .reduce((acc, s) => acc + Number(s.price || 0), 0) +
         adjustments
           .filter((a) => a.date.startsWith(reportMonth))
-          .reduce((acc, a) => acc + a.amount, 0),
+          .reduce((acc, a) => acc + Number(a.amount || 0), 0),
       goalPercent: Math.min(
         Math.round((monthlyRevTotal / (session?.monthlyGoal || 5000)) * 100),
         100,
@@ -806,10 +806,10 @@ const App: React.FC = () => {
     // Calc overall totals
     const servicesTotal = compApts
       .filter((a) => a.paid)
-      .reduce((acc, a) => acc + a.finalPrice, 0);
-    const salesTotal = yearSales.reduce((acc, s) => acc + s.price, 0);
+      .reduce((acc, a) => acc + Number(a.finalPrice || 0), 0);
+    const salesTotal = yearSales.reduce((acc, s) => acc + Number(s.price || 0), 0);
     const adjustmentsTotal = yearAdjustments.reduce(
-      (acc, a) => acc + a.amount,
+      (acc, a) => acc + Number(a.amount || 0),
       0,
     );
     const grandTotal = servicesTotal + salesTotal + adjustmentsTotal;
@@ -862,13 +862,13 @@ const App: React.FC = () => {
       const mCuts = compApts.filter((a) => a.date.startsWith(monthPrefix));
       const mServices = mCuts
         .filter((a) => a.paid)
-        .reduce((acc, a) => acc + a.finalPrice, 0);
+        .reduce((acc, a) => acc + Number(a.finalPrice || 0), 0);
       const mSales = yearSales
         .filter((s) => s.date.startsWith(monthPrefix))
-        .reduce((acc, s) => acc + s.price, 0);
+        .reduce((acc, s) => acc + Number(s.price || 0), 0);
       const mAdjustments = yearAdjustments
         .filter((a) => a.date.startsWith(monthPrefix))
-        .reduce((acc, a) => acc + a.amount, 0);
+        .reduce((acc, a) => acc + Number(a.amount || 0), 0);
       const mTotal = mServices + mSales + mAdjustments;
 
       csvLines.push(
@@ -3905,7 +3905,7 @@ const App: React.FC = () => {
                     {formatCurrency(
                       appointments
                         .filter((a) => a.completed && !a.paid)
-                        .reduce((acc, a) => acc + a.finalPrice, 0),
+                        .reduce((acc, a) => acc + Number(a.finalPrice || 0), 0),
                     )}
                   </p>
                 </div>
@@ -3915,7 +3915,7 @@ const App: React.FC = () => {
                   </p>
                   <p className="text-4xl font-black text-white">
                     {formatCurrency(
-                      adjustments.reduce((acc, a) => acc + a.amount, 0),
+                      adjustments.reduce((acc, a) => acc + Number(a.amount || 0), 0),
                     )}
                   </p>
                 </div>
