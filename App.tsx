@@ -203,6 +203,173 @@ const WoodenMouseSignature = ({ minimal = false }: { minimal?: boolean }) => {
   );
 };
 
+interface BusinessHoursCardProps {
+  session: any;
+  setSession: React.Dispatch<React.SetStateAction<any>>;
+  showToast: (msg: string, type?: "success" | "error" | "info") => void;
+}
+
+const BusinessHoursCard: React.FC<BusinessHoursCardProps> = ({
+  session,
+  setSession,
+  showToast,
+}) => {
+  const currentHours = session?.businessHours || {
+    open: "08:00",
+    close: "19:00",
+    days: [1, 2, 3, 4, 5, 6],
+  };
+
+  const [localHours, setLocalHours] = useState({
+    open: currentHours.open || "08:00",
+    close: currentHours.close || "19:00",
+    days: currentHours.days || [1, 2, 3, 4, 5, 6],
+    intervalStart: currentHours.intervalStart || "",
+    intervalEnd: currentHours.intervalEnd || "",
+  });
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync with database if session businessHours changes
+  useEffect(() => {
+    if (session?.businessHours) {
+      setLocalHours({
+        open: session.businessHours.open || "08:00",
+        close: session.businessHours.close || "19:00",
+        days: session.businessHours.days || [1, 2, 3, 4, 5, 6],
+        intervalStart: session.businessHours.intervalStart || "",
+        intervalEnd: session.businessHours.intervalEnd || "",
+      });
+    }
+  }, [session?.businessHours]);
+
+  const toggleDay = (day: number) => {
+    const newDays = localHours.days.includes(day)
+      ? localHours.days.filter((d: number) => d !== day)
+      : [...localHours.days, day].sort();
+
+    setLocalHours((h) => ({ ...h, days: newDays }));
+  };
+
+  const handleSave = async () => {
+    if (!session) return;
+    setIsSaving(true);
+    try {
+      const updatedHours = {
+        open: localHours.open || "08:00",
+        close: localHours.close || "19:00",
+        days: localHours.days || [1, 2, 3, 4, 5, 6],
+        intervalStart: localHours.intervalStart || null,
+        intervalEnd: localHours.intervalEnd || null,
+      };
+
+      setSession((s: any) =>
+        s ? { ...s, businessHours: updatedHours } : null
+      );
+
+      const userId = auth.currentUser?.uid;
+      if (userId) {
+        await setDoc(
+          doc(db, "users", userId),
+          {
+            businessHours: updatedHours,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        showToast("Horários salvos com sucesso!", "success");
+      }
+    } catch (err) {
+      console.error("Erro ao salvar horários de funcionamento:", err);
+      showToast("Erro ao salvar horários de funcionamento.", "error");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Card title="Horário de Funcionamento" icon={<Clock size={16} />}>
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="ABERTURA"
+            type="time"
+            value={localHours.open}
+            onChange={(e) =>
+              setLocalHours((h) => ({ ...h, open: e.target.value }))
+            }
+          />
+          <Input
+            label="FECHAMENTO"
+            type="time"
+            value={localHours.close}
+            onChange={(e) =>
+              setLocalHours((h) => ({ ...h, close: e.target.value }))
+            }
+          />
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+            DIAS DE ATENDIMENTO
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {["D", "S", "T", "Q", "Q", "S", "S"].map((label, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => toggleDay(i)}
+                className={`w-10 h-10 rounded-xl font-black text-xs transition-all cursor-pointer ${
+                  localHours.days.includes(i)
+                    ? "bg-elite-red-500 text-white shadow-lg"
+                    : "bg-slate-900 text-slate-500 border border-white/5"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4 pt-4 border-t border-white/5">
+          <p className="text-[10px] font-black text-white italic uppercase tracking-widest flex items-center gap-2">
+            <Zap size={14} className="text-elite-cyan-400" />
+            Intervalo de Almoço/Pausa
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="INÍCIO"
+              type="time"
+              value={localHours.intervalStart}
+              onChange={(e) =>
+                setLocalHours((h) => ({ ...h, intervalStart: e.target.value }))
+              }
+            />
+            <Input
+              label="FIM"
+              type="time"
+              value={localHours.intervalEnd}
+              onChange={(e) =>
+                setLocalHours((h) => ({ ...h, intervalEnd: e.target.value }))
+              }
+            />
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          onClick={handleSave}
+          isLoading={isSaving}
+          variant="success"
+          className="w-full h-11 text-[10px] tracking-widest font-black uppercase flex items-center justify-center gap-2 mt-4"
+        >
+          <Save size={14} /> SALVAR EXPEDIENTE
+        </Button>
+      </div>
+    </Card>
+  );
+};
+
 const App: React.FC = () => {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(true);
@@ -1496,27 +1663,6 @@ const App: React.FC = () => {
   };
 
   const OnlineBookingView = () => {
-    const hours = session?.businessHours || {
-      open: "08:00",
-      close: "19:00",
-      days: [1, 2, 3, 4, 5, 6],
-    };
-
-    const toggleDay = (day: number) => {
-      const newDays = hours.days.includes(day)
-        ? hours.days.filter((d) => d !== day)
-        : [...hours.days, day].sort();
-
-      setSession((s) =>
-        s
-          ? {
-              ...s,
-              businessHours: { ...hours, days: newDays },
-            }
-          : null,
-      );
-    };
-
     const isDayOff = session?.unavailableSlots?.some(
       (u) => u.date === selectedBookingDate,
     );
@@ -1564,107 +1710,11 @@ const App: React.FC = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 space-y-6">
-            <Card title="Horário de Funcionamento" icon={<Clock size={16} />}>
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    label="ABERTURA"
-                    type="time"
-                    value={hours.open}
-                    onChange={(e) =>
-                      setSession((s) =>
-                        s
-                          ? {
-                              ...s,
-                              businessHours: { ...hours, open: e.target.value },
-                            }
-                          : null,
-                      )
-                    }
-                  />
-                  <Input
-                    label="FECHAMENTO"
-                    type="time"
-                    value={hours.close}
-                    onChange={(e) =>
-                      setSession((s) =>
-                        s
-                          ? {
-                              ...s,
-                              businessHours: {
-                                ...hours,
-                                close: e.target.value,
-                              },
-                            }
-                          : null,
-                      )
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                    DIAS DE ATENDIMENTO
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {["D", "S", "T", "Q", "Q", "S", "S"].map((label, i) => (
-                      <button
-                        key={i}
-                        onClick={() => toggleDay(i)}
-                        className={`w-10 h-10 rounded-xl font-black text-xs transition-all ${hours.days.includes(i) ? "bg-elite-red-500 text-white shadow-lg" : "bg-slate-900 text-slate-500 border border-white/5"}`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-4 pt-4 border-t border-white/5">
-                  <p className="text-[10px] font-black text-white italic uppercase tracking-widest flex items-center gap-2">
-                    <Zap size={14} className="text-elite-cyan-400" />
-                    Intervalo de Almoço/Pausa
-                  </p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="INÍCIO"
-                      type="time"
-                      value={hours.intervalStart || ""}
-                      onChange={(e) =>
-                        setSession((s) =>
-                          s
-                            ? {
-                                ...s,
-                                businessHours: {
-                                  ...hours,
-                                  intervalStart: e.target.value,
-                                },
-                              }
-                            : null,
-                        )
-                      }
-                    />
-                    <Input
-                      label="FIM"
-                      type="time"
-                      value={hours.intervalEnd || ""}
-                      onChange={(e) =>
-                        setSession((s) =>
-                          s
-                            ? {
-                                ...s,
-                                businessHours: {
-                                  ...hours,
-                                  intervalEnd: e.target.value,
-                                },
-                              }
-                            : null,
-                        )
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-            </Card>
+            <BusinessHoursCard
+              session={session}
+              setSession={setSession}
+              showToast={showToast}
+            />
 
             <Card title="Link do Cliente" icon={<LinkIcon size={16} />}>
               <div className="space-y-4">
