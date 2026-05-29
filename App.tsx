@@ -1634,8 +1634,8 @@ const App: React.FC = () => {
     const dayOfWeek = new Date(date).getDay();
     if (!session.businessHours.days.includes(dayOfWeek)) return [];
 
-    // Check if whole day is unavailable
-    if (session.unavailableSlots?.some((u) => u.date === date)) return [];
+    // Check if whole day is unavailable (has no specific time)
+    if (session.unavailableSlots?.some((u) => u.date === date && !u.time)) return [];
 
     const allSlots = generateTimeSlots(
       date,
@@ -1652,6 +1652,12 @@ const App: React.FC = () => {
 
     // Filter occupied slots
     return allSlots.filter((time) => {
+      // Check if slot itself is blocked
+      const isBlockedSlot = session.unavailableSlots?.some(
+        (u) => u.date === date && u.time === time,
+      );
+      if (isBlockedSlot) return false;
+
       // Check appointments
       const isAptCollision = appointments.some((a) => {
         if (a.date !== date || a.status === AppointmentStatus.Rejected) return false;
@@ -1696,19 +1702,84 @@ const App: React.FC = () => {
 
   const OnlineBookingView = () => {
     const isDayOff = session?.unavailableSlots?.some(
-      (u) => u.date === selectedBookingDate,
+      (u) => u.date === selectedBookingDate && !u.time,
     );
 
     const toggleDayOff = async () => {
       if (!session) return;
+      const userId = auth.currentUser?.uid;
       const newSlots = isDayOff
         ? (session.unavailableSlots || []).filter(
-            (u) => u.date !== selectedBookingDate,
+            (u) => !(u.date === selectedBookingDate && !u.time),
           )
-        : [...(session.unavailableSlots || []), { date: selectedBookingDate }];
+        : [
+            ...(session.unavailableSlots || []).filter(
+              (u) => u.date !== selectedBookingDate,
+            ),
+            { date: selectedBookingDate },
+          ];
 
       setSession({ ...session, unavailableSlots: newSlots });
+      if (userId) {
+        try {
+          await updateDoc(doc(db, "users", userId), {
+            unavailableSlots: newSlots,
+          });
+        } catch (err) {
+          console.error("Erro ao salvar folga:", err);
+          showToast("Erro ao sincronizar folga com o banco de dados.", "error");
+        }
+      }
       showToast(isDayOff ? "Dia liberado!" : "Dia marcado como indisponível.");
+    };
+
+    const blockHours = session?.businessHours || {
+      open: "08:00",
+      close: "19:00",
+      days: [1, 2, 3, 4, 5, 6],
+    };
+
+    const slotsForBlocking = generateTimeSlots(
+      selectedBookingDate,
+      blockHours.open,
+      blockHours.close,
+      blockHours.intervalStart || undefined,
+      blockHours.intervalEnd || undefined,
+    );
+
+    const toggleSlotBlock = async (slotTime: string) => {
+      if (!session) return;
+      const userId = auth.currentUser?.uid;
+      const currentSlots = session.unavailableSlots || [];
+      const isBlocked = currentSlots.some(
+        (u) => u.date === selectedBookingDate && u.time === slotTime,
+      );
+
+      let newSlots;
+      if (isBlocked) {
+        newSlots = currentSlots.filter(
+          (u) => !(u.date === selectedBookingDate && u.time === slotTime),
+        );
+      } else {
+        newSlots = [...currentSlots, { date: selectedBookingDate, time: slotTime }];
+      }
+
+      setSession({ ...session, unavailableSlots: newSlots });
+      if (userId) {
+        try {
+          await updateDoc(doc(db, "users", userId), {
+            unavailableSlots: newSlots,
+          });
+        } catch (err) {
+          console.error("Erro ao salvar bloqueio de horário:", err);
+          showToast("Erro ao sincronizar bloqueio de horário.", "error");
+        }
+      }
+      showToast(
+        isBlocked
+          ? `Horário das ${slotTime} liberado!`
+          : `Horário das ${slotTime} bloqueado!`,
+      );
     };
 
     return (
@@ -1747,6 +1818,88 @@ const App: React.FC = () => {
               setSession={setSession}
               showToast={showToast}
             />
+
+            <Card title="Bloquear Horários" icon={<Lock size={16} className="text-elite-red-500" />}>
+              <div className="space-y-4">
+                <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">
+                  Trabalhe com flexibilidade! Selecione horários específicos no dia{" "}
+                  <strong className="text-elite-cyan-400">
+                    {selectedBookingDate.split("-").reverse().join("/")}
+                  </strong>{" "}
+                  para bloqueá-los de novos agendamentos online.
+                </p>
+
+                {isDayOff ? (
+                  <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-center">
+                    <p className="text-xs text-red-400 font-bold uppercase italic">
+                      Este dia está marcado como folga
+                    </p>
+                    <p className="text-[9px] text-slate-500 mt-1 uppercase font-semibold">
+                      Gostaria de bloquear horários específicos? Libere o dia primeiro.
+                    </p>
+                  </div>
+                ) : slotsForBlocking.length === 0 ? (
+                  <p className="text-center py-6 text-slate-500 text-[10px] uppercase font-black">
+                    Nenhum horário comercial cadastrado
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-4 gap-2">
+                    {slotsForBlocking.map((timeStr) => {
+                      const isBlocked = session?.unavailableSlots?.some(
+                        (u) => u.date === selectedBookingDate && u.time === timeStr,
+                      );
+
+                      // Check if occupied by a booked appointment or a request
+                      const isBooked = appointments.some(
+                        (a) =>
+                          a.date === selectedBookingDate &&
+                          a.time === timeStr &&
+                          a.status !== AppointmentStatus.Rejected,
+                      );
+
+                      const isPending = appointmentRequests.some(
+                        (r) =>
+                          r.date === selectedBookingDate &&
+                          r.time === timeStr &&
+                          r.status === "pending",
+                      );
+
+                      let btnStyle = "border border-white/5 bg-slate-950/40 text-slate-300 hover:border-elite-cyan-500 hover:text-white";
+                      let statusText = null;
+
+                      if (isBlocked) {
+                        btnStyle = "border border-red-500/50 bg-red-500/20 text-red-500 font-black hover:bg-red-500/30";
+                        statusText = "BLOQUEADO";
+                      } else if (isBooked) {
+                        btnStyle = "border border-emerald-500/30 bg-emerald-500/5 text-emerald-400/80 cursor-not-allowed opacity-80";
+                        statusText = "AGENDADO";
+                      } else if (isPending) {
+                        btnStyle = "border border-amber-500/30 bg-amber-500/5 text-amber-500/80 cursor-not-allowed opacity-80";
+                        statusText = "PENDENTE";
+                      }
+
+                      return (
+                        <button
+                          key={timeStr}
+                          type="button"
+                          disabled={isBooked || isPending}
+                          onClick={() => toggleSlotBlock(timeStr)}
+                          className={`flex flex-col items-center justify-center p-2 rounded-xl text-[10px] font-bold transition-all ${btnStyle}`}
+                          title={`${timeStr} - ${statusText || "Livre"}`}
+                        >
+                          <span className="text-xs">{timeStr}</span>
+                          {statusText && (
+                            <span className="text-[6px] tracking-tighter opacity-80 uppercase mt-0.5 font-bold">
+                              {statusText}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Card>
 
             <Card title="Link do Cliente" icon={<LinkIcon size={16} />}>
               <div className="space-y-4">
@@ -5198,8 +5351,8 @@ const PublicBookingView: React.FC<PublicBookingViewProps> = ({ barberIdFromUrl }
     const dayOfWeek = new Date(date).getDay();
     if (!bookingBarber.businessHours.days.includes(dayOfWeek)) return [];
 
-    // Check if whole day is unavailable
-    if (bookingBarber.unavailableSlots?.some((u: any) => u.date === date)) return [];
+    // Check if whole day is unavailable (has no specific time)
+    if (bookingBarber.unavailableSlots?.some((u: any) => u.date === date && !u.time)) return [];
 
     const allSlots = generateTimeSlots(
       date,
@@ -5216,6 +5369,12 @@ const PublicBookingView: React.FC<PublicBookingViewProps> = ({ barberIdFromUrl }
 
     // Filter occupied slots
     return allSlots.filter((time) => {
+      // Check if slot itself is blocked
+      const isBlockedSlot = bookingBarber.unavailableSlots?.some(
+        (u: any) => u.date === date && u.time === time,
+      );
+      if (isBlockedSlot) return false;
+
       // Check appointments
       const isAptCollision = appointments.some((a) => {
         if (a.date !== date || a.status === AppointmentStatus.Rejected) return false;
@@ -5671,7 +5830,7 @@ const PublicBookingView: React.FC<PublicBookingViewProps> = ({ barberIdFromUrl }
                             const isBusinessDay = bookingBarber?.businessHours?.days?.includes(dayOfWeek);
 
                             // Blocked check
-                            const isBlocked = bookingBarber?.unavailableSlots?.some((u: any) => u.date === cell.dateStr);
+                            const isBlocked = bookingBarber?.unavailableSlots?.some((u: any) => u.date === cell.dateStr && !u.time);
 
                             const isDisabled = isPast || !isBusinessDay || isBlocked;
                             
