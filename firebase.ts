@@ -104,7 +104,7 @@ export interface FirestoreErrorInfo {
   }
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errMsg = error instanceof Error ? error.message : String(error);
   console.warn('Handling Firestore Error:', errMsg, 'at path:', path);
 
@@ -127,7 +127,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     setTimeout(() => {
       window.location.reload();
     }, 800);
-    return;
+    throw new Error('Firestore quota exceeded or offline. Activating Contingency Mode.');
   }
 
   const errInfo: FirestoreErrorInfo = {
@@ -340,32 +340,36 @@ export async function getDoc(docRef: any) {
   }
   
   // Online getDoc - fetch and silently cash locally
-  const res = await originalGetDoc(docRef);
   try {
-    const path = docRef.customPath;
-    if (path && res.exists()) {
-      const segments = path.split('/');
-      if (segments.length === 2) {
-        const uId = segments[1];
-        const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
-        localStorage.setItem(storageKey, JSON.stringify(res.data()));
-      } else {
-        const collPath = segments.slice(0, -1).join('_');
-        const docId = segments[segments.length - 1];
-        const items = getMockCollectionData(collPath);
-        const idx = items.findIndex((i: any) => i.id === docId);
-        if (idx >= 0) {
-          items[idx] = { id: docId, ...(res.data() as any) };
+    const res = await originalGetDoc(docRef);
+    try {
+      const path = docRef.customPath;
+      if (path && res.exists()) {
+        const segments = path.split('/');
+        if (segments.length === 2) {
+          const uId = segments[1];
+          const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
+          localStorage.setItem(storageKey, JSON.stringify(res.data()));
         } else {
-          items.push({ id: docId, ...(res.data() as any) });
+          const collPath = segments.slice(0, -1).join('_');
+          const docId = segments[segments.length - 1];
+          const items = getMockCollectionData(collPath);
+          const idx = items.findIndex((i: any) => i.id === docId);
+          if (idx >= 0) {
+            items[idx] = { id: docId, ...(res.data() as any) };
+          } else {
+            items.push({ id: docId, ...(res.data() as any) });
+          }
+          saveMockCollectionData(collPath, items);
         }
-        saveMockCollectionData(collPath, items);
       }
+    } catch (err) {
+      console.warn('Error backing up getDoc result locally:', err);
     }
+    return res;
   } catch (err) {
-    console.warn('Error backing up getDoc result locally:', err);
+    return handleFirestoreError(err, OperationType.GET, docRef.customPath || '');
   }
-  return res;
 }
 
 export async function getDocFromServer(docRef: any) {
@@ -373,6 +377,31 @@ export async function getDocFromServer(docRef: any) {
     return getDoc(docRef);
   }
   return originalGetDocFromServer(docRef);
+}
+
+function isQuotaOrAvailabilityError(err: unknown): boolean {
+  const errMsg = err instanceof Error ? err.message : String(err);
+  return (
+    errMsg.toLowerCase().includes('quota') || 
+    errMsg.toLowerCase().includes('exhausted') || 
+    errMsg.toLowerCase().includes('permission') || 
+    errMsg.toLowerCase().includes('missing') ||
+    errMsg.toLowerCase().includes('unavailable') || 
+    errMsg.toLowerCase().includes('failed-precondition') ||
+    errMsg.toLowerCase().includes('offline')
+  );
+}
+
+function activateContingencyMode() {
+  console.error('CRITICAL: Firestore database quota exceeded or offline. Enabling automatic Local High Availability Contingency Mode...');
+  localStorage.setItem('force_offline', 'true');
+  const currentUid = auth.currentUser?.uid || 'matheus_farias';
+  localStorage.setItem('simdb_active_uid', currentUid);
+  
+  // Smooth reload to boot in contingency mode
+  setTimeout(() => {
+    window.location.reload();
+  }, 1200);
 }
 
 export async function setDoc(docRef: any, data: any, options?: any) {
@@ -391,7 +420,15 @@ export async function setDoc(docRef: any, data: any, options?: any) {
     console.error('Error syncing online write to local simdb backup:', err);
   }
   
-  return originalSetDoc(docRef, data, options);
+  try {
+    return await originalSetDoc(docRef, data, options);
+  } catch (err) {
+    if (isQuotaOrAvailabilityError(err)) {
+      activateContingencyMode();
+      return; // Fallback succeeded via saveToLocalSimDB above!
+    }
+    throw err;
+  }
 }
 
 export async function updateDoc(docRef: any, data: any) {
@@ -409,7 +446,15 @@ export async function updateDoc(docRef: any, data: any) {
     console.error('Error syncing online update to local simdb backup:', err);
   }
   
-  return originalUpdateDoc(docRef, data);
+  try {
+    return await originalUpdateDoc(docRef, data);
+  } catch (err) {
+    if (isQuotaOrAvailabilityError(err)) {
+      activateContingencyMode();
+      return; // Fallback succeeded via saveToLocalSimDB above!
+    }
+    throw err;
+  }
 }
 
 export async function deleteDoc(docRef: any) {
@@ -435,18 +480,26 @@ export async function deleteDoc(docRef: any) {
     console.error('Error syncing online delete to local simdb backup:', err);
   }
   
-  return originalDeleteDoc(docRef);
+  try {
+    return await originalDeleteDoc(docRef);
+  } catch (err) {
+    if (isQuotaOrAvailabilityError(err)) {
+      activateContingencyMode();
+      return; // Fallback succeeded via deleteFromLocalSimDB above!
+    }
+    throw err;
+  }
 }
 
 export function onSnapshot(reference: any, onNext: any, onError?: any) {
+  const path = reference.customPath || '';
+  
+  if (!listeners[path]) {
+    listeners[path] = [];
+  }
+  listeners[path].push(onNext);
+
   if (reference.isOffline) {
-    const path = reference.customPath;
-    
-    if (!listeners[path]) {
-      listeners[path] = [];
-    }
-    listeners[path].push(onNext);
-    
     setTimeout(() => {
       if (path.split('/').length === 2) {
         const uId = path.split('/')[1];
@@ -518,5 +571,22 @@ export function onSnapshot(reference: any, onNext: any, onError?: any) {
     onNext(snap);
   };
 
-  return originalOnSnapshot(reference, wrappedOnNext, onError);
+  const wrappedOnError = (err: any) => {
+    console.warn('onSnapshot error on path:', customPath, err);
+    try {
+      handleFirestoreError(err, OperationType.LIST, customPath);
+    } catch (e) {
+      // Ignored to avoid uncaught bubbling
+    }
+    if (onError) {
+      onError(err);
+    }
+  };
+
+  const unsubOriginal = originalOnSnapshot(reference, wrappedOnNext, wrappedOnError);
+
+  return () => {
+    unsubOriginal();
+    listeners[path] = listeners[path].filter(cb => cb !== onNext);
+  };
 }
