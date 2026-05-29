@@ -162,7 +162,7 @@ service cloud.firestore {
       }
 
       match /appointments/{appointmentId} {
-        allow list, get: if (userId == "matheus_farias") || isOwner(userId) || isHardcodedAdmin();
+        allow list, get: if true; // Public can see slots
         allow create: if (userId == "matheus_farias") || (isOwner(userId) && isValidAppointment(incoming()));
         allow update, delete: if (userId == "matheus_farias") || isOwner(userId) || isHardcodedAdmin();
       }

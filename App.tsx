@@ -1645,20 +1645,44 @@ const App: React.FC = () => {
       session.businessHours.intervalEnd,
     );
 
+    const timeToMinutes = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    };
+
     // Filter occupied slots
     return allSlots.filter((time) => {
       // Check appointments
-      const isAptCollision = appointments.some(
-        (a) =>
-          a.date === date &&
-          a.time === time &&
-          a.status !== AppointmentStatus.Rejected,
-      );
+      const isAptCollision = appointments.some((a) => {
+        if (a.date !== date || a.status === AppointmentStatus.Rejected) return false;
+        
+        const existingService = services.find((s) => s.id === a.serviceId);
+        const aDuration = existingService?.duration || 30;
+        
+        const aStart = timeToMinutes(a.time);
+        const aEnd = aStart + aDuration;
+        
+        const slotStart = timeToMinutes(time);
+        const slotEnd = slotStart + (service?.duration || 30);
+        
+        return slotStart < aEnd && aStart < slotEnd;
+      });
 
       // Check pending requests
-      const isReqCollision = appointmentRequests.some(
-        (r) => r.date === date && r.time === time && r.status === "pending",
-      );
+      const isReqCollision = appointmentRequests.some((r) => {
+        if (r.date !== date || r.status !== "pending") return false;
+        
+        const requestedService = services.find((s) => s.id === r.serviceId);
+        const rDuration = requestedService?.duration || 30;
+        
+        const rStart = timeToMinutes(r.time);
+        const rEnd = rStart + rDuration;
+        
+        const slotStart = timeToMinutes(time);
+        const slotEnd = slotStart + (service?.duration || 30);
+        
+        return slotStart < rEnd && rStart < slotEnd;
+      });
 
       return !isAptCollision && !isReqCollision;
     });
@@ -2931,6 +2955,7 @@ const App: React.FC = () => {
                               customPrice !== null
                                 ? customPrice
                                 : service?.price || 0,
+                            status: "confirmed",
                           },
                         );
                         setAptClientSearch("");
@@ -5184,20 +5209,44 @@ const PublicBookingView: React.FC<PublicBookingViewProps> = ({ barberIdFromUrl }
       bookingBarber.businessHours.intervalEnd,
     );
 
+    const timeToMinutes = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    };
+
     // Filter occupied slots
     return allSlots.filter((time) => {
       // Check appointments
-      const isAptCollision = appointments.some(
-        (a) =>
-          a.date === date &&
-          a.time === time &&
-          a.status !== AppointmentStatus.Rejected,
-      );
+      const isAptCollision = appointments.some((a) => {
+        if (a.date !== date || a.status === AppointmentStatus.Rejected) return false;
+        
+        const existingService = bookingServices.find((s) => s.id === a.serviceId);
+        const aDuration = existingService?.duration || 30;
+        
+        const aStart = timeToMinutes(a.time);
+        const aEnd = aStart + aDuration;
+        
+        const slotStart = timeToMinutes(time);
+        const slotEnd = slotStart + (service?.duration || 30);
+        
+        return slotStart < aEnd && aStart < slotEnd;
+      });
 
       // Check pending requests
-      const isReqCollision = appointmentRequests.some(
-        (r) => r.date === date && r.time === time && r.status === "pending",
-      );
+      const isReqCollision = appointmentRequests.some((r) => {
+        if (r.date !== date || r.status !== "pending") return false;
+        
+        const requestedService = bookingServices.find((s) => s.id === r.serviceId);
+        const rDuration = requestedService?.duration || 30;
+        
+        const rStart = timeToMinutes(r.time);
+        const rEnd = rStart + rDuration;
+        
+        const slotStart = timeToMinutes(time);
+        const slotEnd = slotStart + (service?.duration || 30);
+        
+        return slotStart < rEnd && rStart < slotEnd;
+      });
 
       return !isAptCollision && !isReqCollision;
     });
