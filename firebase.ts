@@ -27,15 +27,36 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 const firebaseAuth = getAuth();
-let simulatedUser: any = {
-  uid: 'matheus_farias',
-  email: 'matheus@barbershop.com',
-  displayName: 'Matheus Farias'
-};
+
+// Initialize simulated session based on previous activeUID to prevent hijacking real logins
+let simulatedUser: any = null;
+
+// Allow persistent offline mode for contingency, do NOT clear force_offline on every reload.
+// This prevents infinite reload-loops when the Firestore database quota is exceeded.
+const activeUid = localStorage.getItem('simdb_active_uid');
+if (activeUid) {
+  simulatedUser = {
+    uid: activeUid,
+    email: localStorage.getItem('simdb_active_email') || 'matheus@barbershop.com',
+    displayName: localStorage.getItem('simdb_active_name') || 'Matheus Farias'
+  };
+} else {
+  simulatedUser = null;
+}
+
 let onAuthStateCallbacks: Array<(user: any) => void> = [];
 
 export const setSimulatedUser = (user: any) => {
   simulatedUser = user;
+  if (user) {
+    localStorage.setItem('simdb_active_uid', user.uid);
+    localStorage.setItem('simdb_active_email', user.email || '');
+    localStorage.setItem('simdb_active_name', user.displayName || '');
+  } else {
+    localStorage.removeItem('simdb_active_uid');
+    localStorage.removeItem('simdb_active_email');
+    localStorage.removeItem('simdb_active_name');
+  }
   onAuthStateCallbacks.forEach(cb => cb(user));
 };
 
@@ -51,6 +72,11 @@ export const auth = new Proxy(firebaseAuth, {
         cb(simulatedUser || firebaseAuth.currentUser);
         
         const unsub = firebaseAuth.onAuthStateChanged((user) => {
+          if (user) {
+            localStorage.setItem('simdb_active_uid', user.uid);
+            localStorage.setItem('simdb_active_email', user.email || '');
+            localStorage.setItem('simdb_active_name', user.displayName || '');
+          }
           if (!simulatedUser) {
             cb(user);
           }
@@ -64,6 +90,9 @@ export const auth = new Proxy(firebaseAuth, {
     if (prop === 'signOut') {
       return async () => {
         simulatedUser = null;
+        localStorage.removeItem('simdb_active_uid');
+        localStorage.removeItem('simdb_active_email');
+        localStorage.removeItem('simdb_active_name');
         onAuthStateCallbacks.forEach(cb => cb(null));
         return firebaseAuth.signOut();
       };
@@ -111,13 +140,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const isQuotaOrAvailabilityFailure = 
     errMsg.toLowerCase().includes('quota') || 
     errMsg.toLowerCase().includes('exhausted') || 
-    errMsg.toLowerCase().includes('permission') || 
-    errMsg.toLowerCase().includes('missing') ||
+    errMsg.toLowerCase().includes('resource-exhausted') || 
     errMsg.toLowerCase().includes('unavailable') || 
     errMsg.toLowerCase().includes('failed-precondition') ||
     errMsg.toLowerCase().includes('offline');
 
   if (isQuotaOrAvailabilityFailure) {
+    if (localStorage.getItem('force_offline') === 'true') {
+      throw new Error('Firestore quota exceeded or offline. Operating in Contingency Mode.');
+    }
     console.error('CRITICAL: Firestore database quota exceeded or offline. Enabling automatic Local High Availability Contingency Mode...');
     localStorage.setItem('force_offline', 'true');
     const currentUid = auth.currentUser?.uid || 'matheus_farias';
@@ -384,8 +415,7 @@ function isQuotaOrAvailabilityError(err: unknown): boolean {
   return (
     errMsg.toLowerCase().includes('quota') || 
     errMsg.toLowerCase().includes('exhausted') || 
-    errMsg.toLowerCase().includes('permission') || 
-    errMsg.toLowerCase().includes('missing') ||
+    errMsg.toLowerCase().includes('resource-exhausted') || 
     errMsg.toLowerCase().includes('unavailable') || 
     errMsg.toLowerCase().includes('failed-precondition') ||
     errMsg.toLowerCase().includes('offline')
@@ -393,6 +423,9 @@ function isQuotaOrAvailabilityError(err: unknown): boolean {
 }
 
 function activateContingencyMode() {
+  if (localStorage.getItem('force_offline') === 'true') {
+    return;
+  }
   console.error('CRITICAL: Firestore database quota exceeded or offline. Enabling automatic Local High Availability Contingency Mode...');
   localStorage.setItem('force_offline', 'true');
   const currentUid = auth.currentUser?.uid || 'matheus_farias';
