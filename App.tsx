@@ -1588,7 +1588,12 @@ const App: React.FC = () => {
   ) => {
     const slots: string[] = [];
     let current = new Date(`${date}T${open}:00`);
-    const end = new Date(`${date}T${close}:00`);
+    let end = new Date(`${date}T${close}:00`);
+
+    // Automatically handle closes past midnight (e.g. 02:00 vs 08:00)
+    if (end <= current) {
+      end.setDate(end.getDate() + 1);
+    }
 
     // Add 30 mins constraint
     const now = new Date();
@@ -1601,12 +1606,15 @@ const App: React.FC = () => {
         hour12: false,
       });
 
-      // Check interval
-      const isInterval =
-        intervalStart &&
-        intervalEnd &&
-        timeStr >= intervalStart &&
-        timeStr < intervalEnd;
+      // Check interval with potential midnight crossing
+      let isInterval = false;
+      if (intervalStart && intervalEnd) {
+        if (intervalStart <= intervalEnd) {
+          isInterval = timeStr >= intervalStart && timeStr < intervalEnd;
+        } else {
+          isInterval = timeStr >= intervalStart || timeStr < intervalEnd;
+        }
+      }
 
       // Check 30 min lead time if date is today
       const slotDateTime = new Date(`${date}T${timeStr}:00`);
@@ -5119,7 +5127,12 @@ const PublicBookingView: React.FC<PublicBookingViewProps> = ({ barberIdFromUrl }
   ) => {
     const slots: string[] = [];
     let current = new Date(`${date}T${open}:00`);
-    const end = new Date(`${date}T${close}:00`);
+    let end = new Date(`${date}T${close}:00`);
+
+    // Automatically handle closes past midnight (e.g. 02:00 vs 08:00)
+    if (end <= current) {
+      end.setDate(end.getDate() + 1);
+    }
 
     // Add 30 mins constraint
     const now = new Date();
@@ -5132,12 +5145,15 @@ const PublicBookingView: React.FC<PublicBookingViewProps> = ({ barberIdFromUrl }
         hour12: false,
       });
 
-      // Check interval
-      const isInterval =
-        intervalStart &&
-        intervalEnd &&
-        timeStr >= intervalStart &&
-        timeStr < intervalEnd;
+      // Check interval with potential midnight crossing
+      let isInterval = false;
+      if (intervalStart && intervalEnd) {
+        if (intervalStart <= intervalEnd) {
+          isInterval = timeStr >= intervalStart && timeStr < intervalEnd;
+        } else {
+          isInterval = timeStr >= intervalStart || timeStr < intervalEnd;
+        }
+      }
 
       // Check 30 min lead time if today
       const slotDateTime = new Date(`${date}T${timeStr}:00`);
