@@ -105,8 +105,33 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  console.warn('Handling Firestore Error:', errMsg, 'at path:', path);
+
+  const isQuotaOrAvailabilityFailure = 
+    errMsg.toLowerCase().includes('quota') || 
+    errMsg.toLowerCase().includes('exhausted') || 
+    errMsg.toLowerCase().includes('permission') || 
+    errMsg.toLowerCase().includes('missing') ||
+    errMsg.toLowerCase().includes('unavailable') || 
+    errMsg.toLowerCase().includes('failed-precondition') ||
+    errMsg.toLowerCase().includes('offline');
+
+  if (isQuotaOrAvailabilityFailure) {
+    console.error('CRITICAL: Firestore database quota exceeded or offline. Enabling automatic Local High Availability Contingency Mode...');
+    localStorage.setItem('force_offline', 'true');
+    const currentUid = auth.currentUser?.uid || 'matheus_farias';
+    localStorage.setItem('simdb_active_uid', currentUid);
+    
+    // Smooth reload to boot in contingency mode
+    setTimeout(() => {
+      window.location.reload();
+    }, 800);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -202,7 +227,7 @@ const saveMockCollectionData = (collPath: string, data: any[]) => {
 
 export function doc(database: any, ...pathSegments: string[]) {
   const fullPath = pathSegments.join('/');
-  const isOffline = fullPath.includes('offline_demo') || pathSegments[1] === 'offline_demo';
+  const isOffline = fullPath.includes('offline_demo') || pathSegments[1] === 'offline_demo' || localStorage.getItem('force_offline') === 'true';
   const ref = originalDoc(database, ...pathSegments as [string, ...string[]]);
   
   (ref as any).isOffline = isOffline;
@@ -212,7 +237,7 @@ export function doc(database: any, ...pathSegments: string[]) {
 
 export function collection(database: any, ...pathSegments: string[]) {
   const fullPath = pathSegments.join('/');
-  const isOffline = fullPath.includes('offline_demo') || pathSegments[1] === 'offline_demo';
+  const isOffline = fullPath.includes('offline_demo') || pathSegments[1] === 'offline_demo' || localStorage.getItem('force_offline') === 'true';
   const ref = originalCollection(database, ...pathSegments as [string, ...string[]]);
   
   (ref as any).isOffline = isOffline;
@@ -221,7 +246,7 @@ export function collection(database: any, ...pathSegments: string[]) {
 }
 
 export function query(queryRef: any, ...queryConstraints: any[]) {
-  const isOffline = queryRef.isOffline;
+  const isOffline = queryRef.isOffline || localStorage.getItem('force_offline') === 'true';
   const ref = originalQuery(queryRef, ...queryConstraints);
   (ref as any).isOffline = isOffline;
   (ref as any).customPath = queryRef.customPath;
@@ -232,14 +257,66 @@ export function where(fieldPath: string, opStr: any, value: any) {
   return originalWhere(fieldPath, opStr, value);
 }
 
+function saveToLocalSimDB(path: string, data: any, options?: any) {
+  const segments = path.split('/');
+  
+  if (segments.length === 2) {
+    const uId = segments[1];
+    const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
+    let current = {};
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      try {
+        current = JSON.parse(raw);
+      } catch {}
+    }
+    const merged = options?.merge ? { ...current, ...data } : data;
+    localStorage.setItem(storageKey, JSON.stringify(merged));
+    triggerListeners(path);
+  } else {
+    const collPath = segments.slice(0, -1).join('_');
+    const collKey = segments.slice(0, -1).join('/');
+    const docId = segments[segments.length - 1];
+    const items = getMockCollectionData(collPath);
+    
+    const idx = items.findIndex((i: any) => i.id === docId);
+    if (idx >= 0) {
+      items[idx] = options?.merge ? { ...items[idx], ...data } : { ...data, id: docId };
+    } else {
+      items.push({ id: docId, ...data });
+    }
+    saveMockCollectionData(collPath, items);
+    triggerListeners(collKey);
+  }
+}
+
+function deleteFromLocalSimDB(path: string) {
+  const segments = path.split('/');
+  if (segments.length > 2) {
+    const collPath = segments.slice(0, -1).join('_');
+    const collKey = segments.slice(0, -1).join('/');
+    const docId = segments[segments.length - 1];
+    let items = getMockCollectionData(collPath);
+    items = items.filter((i: any) => i.id !== docId);
+    saveMockCollectionData(collPath, items);
+    triggerListeners(collKey);
+  }
+}
+
 export async function getDoc(docRef: any) {
   if (docRef.isOffline) {
     const path = docRef.customPath;
     const segments = path.split('/');
     
     if (segments.length === 2) {
-      const userData = localStorage.getItem('simdb_user_offline_demo');
-      const val = userData ? JSON.parse(userData) : getInitialUserData();
+      const uId = segments[1];
+      const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
+      const userData = localStorage.getItem(storageKey);
+      const val = userData ? JSON.parse(userData) : {
+        ...getInitialUserData(),
+        username: uId,
+        shopName: uId === 'matheus_farias' ? 'Barbearia Matheus Farias' : `Barbearia de ${uId.replace(/_/g, ' ')}`,
+      };
       return {
         exists: () => true,
         data: () => val
@@ -255,7 +332,34 @@ export async function getDoc(docRef: any) {
       };
     }
   }
-  return originalGetDoc(docRef);
+  
+  // Online getDoc - fetch and silently cash locally
+  const res = await originalGetDoc(docRef);
+  try {
+    const path = docRef.customPath;
+    if (path && res.exists()) {
+      const segments = path.split('/');
+      if (segments.length === 2) {
+        const uId = segments[1];
+        const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
+        localStorage.setItem(storageKey, JSON.stringify(res.data()));
+      } else {
+        const collPath = segments.slice(0, -1).join('_');
+        const docId = segments[segments.length - 1];
+        const items = getMockCollectionData(collPath);
+        const idx = items.findIndex((i: any) => i.id === docId);
+        if (idx >= 0) {
+          items[idx] = { id: docId, ...(res.data() as any) };
+        } else {
+          items.push({ id: docId, ...(res.data() as any) });
+        }
+        saveMockCollectionData(collPath, items);
+      }
+    }
+  } catch (err) {
+    console.warn('Error backing up getDoc result locally:', err);
+  }
+  return res;
 }
 
 export async function getDocFromServer(docRef: any) {
@@ -266,63 +370,65 @@ export async function getDocFromServer(docRef: any) {
 }
 
 export async function setDoc(docRef: any, data: any, options?: any) {
+  const path = docRef.customPath || '';
+  
   if (docRef.isOffline) {
-    const path = docRef.customPath;
-    const segments = path.split('/');
-    
-    if (segments.length === 2) {
-      let current = {};
-      const raw = localStorage.getItem('simdb_user_offline_demo');
-      if (raw) {
-        try {
-          current = JSON.parse(raw);
-        } catch {}
-      }
-      const merged = options?.merge ? { ...current, ...data } : data;
-      localStorage.setItem('simdb_user_offline_demo', JSON.stringify(merged));
-      triggerListeners(path);
-    } else {
-      const collPath = segments.slice(0, -1).join('_');
-      const collKey = segments.slice(0, -1).join('/');
-      const docId = segments[segments.length - 1];
-      const items = getMockCollectionData(collPath);
-      
-      const idx = items.findIndex((i: any) => i.id === docId);
-      if (idx >= 0) {
-        items[idx] = options?.merge ? { ...items[idx], ...data } : data;
-      } else {
-        items.push({ id: docId, ...data });
-      }
-      saveMockCollectionData(collPath, items);
-      triggerListeners(collKey);
-    }
+    localStorage.setItem("simdb_has_local_changes", "true");
+    saveToLocalSimDB(path, data, options);
     return;
   }
+  
+  // Sync to local Quiet Backup
+  try {
+    saveToLocalSimDB(path, data, options);
+  } catch (err) {
+    console.error('Error syncing online write to local simdb backup:', err);
+  }
+  
   return originalSetDoc(docRef, data, options);
 }
 
 export async function updateDoc(docRef: any, data: any) {
+  const path = docRef.customPath || '';
+  
   if (docRef.isOffline) {
-    return setDoc(docRef, data, { merge: true });
+    localStorage.setItem("simdb_has_local_changes", "true");
+    saveToLocalSimDB(path, data, { merge: true });
+    return;
   }
+  
+  try {
+    saveToLocalSimDB(path, data, { merge: true });
+  } catch (err) {
+    console.error('Error syncing online update to local simdb backup:', err);
+  }
+  
   return originalUpdateDoc(docRef, data);
 }
 
 export async function deleteDoc(docRef: any) {
+  const path = docRef.customPath || '';
+  
   if (docRef.isOffline) {
-    const path = docRef.customPath;
     const segments = path.split('/');
     if (segments.length > 2) {
-      const collPath = segments.slice(0, -1).join('_');
-      const collKey = segments.slice(0, -1).join('/');
-      const docId = segments[segments.length - 1];
-      let items = getMockCollectionData(collPath);
-      items = items.filter((i: any) => i.id !== docId);
-      saveMockCollectionData(collPath, items);
-      triggerListeners(collKey);
+      deleteFromLocalSimDB(path);
+      
+      const pendingDeletionsStr = localStorage.getItem("simdb_pending_deletions");
+      const pendingDeletions = pendingDeletionsStr ? JSON.parse(pendingDeletionsStr) : [];
+      pendingDeletions.push(path);
+      localStorage.setItem("simdb_pending_deletions", JSON.stringify(pendingDeletions));
+      localStorage.setItem("simdb_has_local_changes", "true");
     }
     return;
   }
+  
+  try {
+    deleteFromLocalSimDB(path);
+  } catch (err) {
+    console.error('Error syncing online delete to local simdb backup:', err);
+  }
+  
   return originalDeleteDoc(docRef);
 }
 
@@ -337,8 +443,14 @@ export function onSnapshot(reference: any, onNext: any, onError?: any) {
     
     setTimeout(() => {
       if (path.split('/').length === 2) {
-        const userData = localStorage.getItem('simdb_user_offline_demo');
-        const val = userData ? JSON.parse(userData) : getInitialUserData();
+        const uId = path.split('/')[1];
+        const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
+        const userData = localStorage.getItem(storageKey);
+        const val = userData ? JSON.parse(userData) : {
+          ...getInitialUserData(),
+          username: uId,
+          shopName: uId === 'matheus_farias' ? 'Barbearia Matheus Farias' : `Barbearia de ${uId.replace(/_/g, ' ')}`,
+        };
         onNext({
           exists: () => true,
           data: () => val
@@ -359,5 +471,31 @@ export function onSnapshot(reference: any, onNext: any, onError?: any) {
       listeners[path] = listeners[path].filter(cb => cb !== onNext);
     };
   }
-  return originalOnSnapshot(reference, onNext, onError);
+  
+  const customPath = reference.customPath;
+  const wrappedOnNext = (snap: any) => {
+    try {
+      if (customPath) {
+        const segments = customPath.split('/');
+        if (segments.length === 2) {
+          if (snap.exists && snap.exists()) {
+            const uId = segments[1];
+            const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
+            localStorage.setItem(storageKey, JSON.stringify(snap.data()));
+          }
+        } else if (segments.length === 3 || segments.length === 4) {
+          if (snap.docs) {
+            const collPath = customPath.replace(/\//g, '_');
+            const docs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+            saveMockCollectionData(collPath, docs);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error syncing onSnapshot to local simdb backup:', err);
+    }
+    onNext(snap);
+  };
+
+  return originalOnSnapshot(reference, wrappedOnNext, onError);
 }

@@ -201,571 +201,6 @@ const WoodenMouseSignature = ({ minimal = false }: { minimal?: boolean }) => {
   );
 };
 
-interface PublicBookingViewProps {
-  barberIdFromUrl: string;
-  bookingBarber: any;
-  bookingServices: Service[];
-  bookingSuccess: boolean;
-  setBookingSuccess: (success: boolean) => void;
-  bookingError: string | null;
-  getAvailableSlots: (date: string, service: Service | null, forcedBarber?: any) => string[];
-  showToast: (message: string, type?: "success" | "error" | "info") => void;
-  services: Service[];
-}
-
-const PublicBookingView: React.FC<PublicBookingViewProps> = ({
-  barberIdFromUrl,
-  bookingBarber,
-  bookingServices,
-  bookingSuccess,
-  setBookingSuccess,
-  bookingError,
-  getAvailableSlots,
-  showToast,
-  services,
-}) => {
-  const [clientSession, setClientSession] = useState<{ name: string; phone: string } | null>(() => {
-    const savedName = localStorage.getItem("bk_client_name");
-    const savedPhone = localStorage.getItem("bk_client_phone");
-    return savedName && savedPhone ? { name: savedName, phone: savedPhone } : null;
-  });
-
-  const [step, setStep] = useState(1);
-  const [selectedService, setSelectedService] = useState<Service | null>(
-    null,
-  );
-  const [bookingDate, setBookingDate] = useState("");
-  const [bookingTime, setBookingTime] = useState("");
-  const [name, setName] = useState(clientSession?.name || "");
-  const [phone, setPhone] = useState(clientSession?.phone || "");
-  const [phoneFilter, setPhoneFilter] = useState(clientSession?.phone || "");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [viewMode, setViewMode] = useState<"booking" | "my-bookings">(
-    "booking",
-  );
-  const [myRequests, setMyRequests] = useState<any[]>([]);
-
-  // Sync state if clientSession changes
-  useEffect(() => {
-    if (clientSession) {
-      setName(clientSession.name);
-      setPhone(clientSession.phone);
-      setPhoneFilter(clientSession.phone);
-    }
-  }, [clientSession]);
-
-  // Automatically load bookings when switching to "my-bookings" mode
-  useEffect(() => {
-    if (viewMode === "my-bookings" && clientSession?.phone) {
-      setPhoneFilter(clientSession.phone);
-    }
-  }, [viewMode, clientSession]);
-
-  useEffect(() => {
-    if (phoneFilter && barberIdFromUrl) {
-      fetchMyBookings();
-    }
-  }, [phoneFilter, barberIdFromUrl]);
-
-  const fetchMyBookings = async () => {
-    const cleanPhone = phoneFilter.replace(/\D/g, "");
-    if (!cleanPhone || !barberIdFromUrl) return;
-    try {
-      const q = query(
-        collection(db, "users", barberIdFromUrl, "requests"),
-        where("clientPhone", "==", cleanPhone),
-      );
-      onSnapshot(q, (snap) => {
-        setMyRequests(
-          snap.docs
-            .map((d) => d.data())
-            .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-        );
-      });
-    } catch (err) {
-      console.error("Error fetching my bookings:", err);
-    }
-  };
-
-  const handleSubmitRequest = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    
-    const currentName = clientSession ? clientSession.name : name.trim();
-    const currentPhone = clientSession ? clientSession.phone.replace(/\D/g, "") : phone.replace(/\D/g, "");
-
-    if (!selectedService || !barberIdFromUrl || !bookingDate || !bookingTime) {
-      showToast("Por favor, selecione serviço, data e horário.", "error");
-      return;
-    }
-
-    if (!currentName || !currentPhone) {
-      showToast("Por favor, informe seu nome e telefone para realizar o agendamento.", "error");
-      if (!clientSession) setStep(3);
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    // Real-time slot conflict check to guarantee zero scheduling conflicts
-    const updatedAvailableSlots = getAvailableSlots(bookingDate, selectedService);
-    if (!updatedAvailableSlots.includes(bookingTime)) {
-      showToast("Esse horário acaba de ser reservado por outro cliente. Por favor, selecione outro.", "error");
-      setIsSubmitting(false);
-      setBookingTime("");
-      setStep(2); // take back to date/time selection
-      return;
-    }
-
-    const requestId = Date.now().toString();
-    try {
-      await setDoc(doc(db, "users", barberIdFromUrl, "requests", requestId), {
-        id: requestId,
-        serviceId: selectedService.id,
-        date: bookingDate,
-        time: bookingTime,
-        clientName: currentName,
-        clientPhone: currentPhone,
-        status: "pending",
-        createdAt: new Date().toISOString(),
-      });
-
-      // Log the client in locally for premium retention and automatic future flows
-      localStorage.setItem("bk_client_name", currentName);
-      localStorage.setItem("bk_client_phone", currentPhone);
-      setClientSession({ name: currentName, phone: currentPhone });
-
-      setBookingSuccess(true);
-    } catch (err) {
-      console.error("Booking error:", err);
-      alert("Erro ao enviar solicitação de agendamento. Por favor, tente novamente.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  if (bookingSuccess) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-        <Card className="glass-card max-w-sm w-full text-center p-8 space-y-6">
-          <div className="h-20 w-20 bg-elite-cyan-500/20 rounded-full flex items-center justify-center mx-auto">
-            <CheckCircle2
-              size={40}
-              className="text-elite-cyan-400 animate-bounce"
-            />
-          </div>
-          <h2 className="text-2xl font-black text-white italic uppercase leading-none">
-            Solicitação Enviada!
-          </h2>
-          <p className="text-slate-400 text-sm italic">
-            O barbeiro recebeu seu horário como <strong className="text-amber-400">Pendente</strong> e confirmará via WhatsApp em breve.
-          </p>
-          <Button
-            className="w-full h-12 text-xs font-black tracking-widest"
-            onClick={() => {
-              setBookingSuccess(false);
-              setBookingDate("");
-              setBookingTime("");
-              setSelectedService(null);
-              setStep(1);
-            }}
-          >
-            VOLTAR AO INÍCIO
-          </Button>
-        </Card>
-      </div>
-    );
-  }
-
-  if (bookingError) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-        <Card className="glass-card max-w-sm w-full text-center p-8 space-y-6 border-elite-red-500/50">
-          <div className="h-20 w-20 bg-elite-red-500/20 rounded-full flex items-center justify-center mx-auto">
-            <AlertTriangle size={40} className="text-elite-red-500" />
-          </div>
-          <h2 className="text-xl font-black text-white italic uppercase">
-            {bookingError}
-          </h2>
-          <Button
-            className="w-full h-12"
-            onClick={() =>
-              (window.location.href =
-                window.location.origin + window.location.pathname)
-            }
-          >
-            TENTAR NOVAMENTE
-          </Button>
-        </Card>
-      </div>
-    );
-  }
-
-  const availableSlots = getAvailableSlots(bookingDate, selectedService);
-
-  if (!bookingBarber)
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-        <div className="animate-pulse flex flex-col items-center gap-4">
-          <LogoElite className="h-24 w-24" />
-          <p className="text-elite-cyan-400 font-black tracking-widest text-[10px] uppercase">
-            Buscando Barbeiro...
-          </p>
-        </div>
-      </div>
-    );
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 md:p-8 pb-32">
-      <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-        
-        {/* Header Bar */}
-        <div className="flex justify-between items-center bg-slate-900/40 p-5 rounded-2xl border border-white/5">
-          <div className="flex-1 space-y-1">
-            <h1 className="text-2xl font-black text-white uppercase italic tracking-tighter leading-none">
-              {bookingBarber.shopName}
-            </h1>
-            <p className="text-elite-cyan-400 text-[9px] font-black uppercase tracking-[0.2em] italic flex items-center gap-1.5">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              Agendamento Online Ativo
-            </p>
-          </div>
-          <button
-            onClick={() =>
-              setViewMode(viewMode === "booking" ? "my-bookings" : "booking")
-            }
-            className="px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest text-[#E1B15F] hover:text-white hover:bg-slate-800 transition-all flex items-center gap-2 cursor-pointer"
-          >
-            <History size={13} />
-            {viewMode === "booking" ? "Meus Pedidos" : "Voltar"}
-          </button>
-        </div>
-
-        {/* Persistent Client Credentials Card */}
-        {clientSession && viewMode === "booking" && (
-          <div className="flex items-center justify-between p-4 bg-[#E1B15F]/5 border border-[#E1B15F]/15 rounded-2xl animate-in slide-in-from-top-2 duration-300">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 bg-[#E1B15F]/10 border border-[#E1B15F]/20 rounded-xl flex items-center justify-center text-[#E1B15F] font-black text-sm italic">
-                {clientSession.name.charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block w-2-h-2 bg-emerald-500 rounded-full"></span>
-                  <p className="text-[9px] font-black text-[#E1B15F] uppercase tracking-wider">Cliente Logado</p>
-                </div>
-                <h4 className="text-xs font-black text-white uppercase mt-0.5 leading-none">{clientSession.name}</h4>
-                <p className="text-[9px] text-slate-500 font-bold tracking-tight mt-1">{clientSession.phone}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem("bk_client_name");
-                localStorage.removeItem("bk_client_phone");
-                setClientSession(null);
-                setName("");
-                setPhone("");
-                showToast("Sessão finalizada! Insira novos dados para agendar.", "info");
-              }}
-              className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/25 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
-            >
-              Mudar Cliente
-            </button>
-          </div>
-        )}
-
-        {viewMode === "my-bookings" ? (
-          <div className="space-y-6">
-            <Card className="glass-card p-6 space-y-4">
-              <h3 className="text-lg font-black text-white italic uppercase flex items-center gap-2">
-                <Search size={20} className="text-[#E1B15F]" />
-                Consultar Agendamentos
-              </h3>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider leading-relaxed">
-                Insira o número do celular cadastrado para acompanhar o status (pendente/confirmado/recusado) de suas solicitações em tempo real.
-              </p>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <Input
-                    placeholder="Seu Celular (Apenas números)"
-                    value={phoneFilter}
-                    onChange={(e) => setPhoneFilter(e.target.value)}
-                  />
-                </div>
-                <Button onClick={fetchMyBookings} className="h-12 px-6 tracking-wider font-extrabold uppercase text-xs">
-                  VERIFICAR
-                </Button>
-              </div>
-            </Card>
-
-            <div className="space-y-3">
-              {myRequests.map((r) => {
-                const service = bookingServices.find((s) => s.id === r.serviceId) || services.find((s) => s.id === r.serviceId);
-                return (
-                  <div
-                    key={r.id}
-                    className="p-5 bg-slate-900/60 rounded-2xl border border-white/5 flex items-center justify-between transition-all hover:bg-slate-900/80"
-                  >
-                    <div>
-                      <p className="text-[10px] text-[#E1B15F] font-black uppercase tracking-widest leading-none mb-1">
-                        {r.date.split("-").reverse().join("/")} • {r.time}
-                      </p>
-                      <p className="text-white font-black italic uppercase text-sm">
-                        {service?.name || "Serviço"}
-                      </p>
-                      <p className="text-[8px] text-slate-500 uppercase tracking-tight mt-1.5">
-                        Para: {r.clientName}
-                      </p>
-                    </div>
-                    <Badge
-                      variant={
-                        r.status === "accepted"
-                          ? "success"
-                          : r.status === "pending"
-                            ? "amber"
-                            : "danger"
-                      }
-                      className={`text-[9px] uppercase tracking-widest px-2.5 py-1 font-extrabold rounded-lg ${
-                        r.status === "pending" ? "bg-amber-500/15 text-amber-500 border border-amber-500/25" : ""
-                      }`}
-                    >
-                      {r.status === "accepted"
-                        ? "CONFIRMADO/ATENDIDO"
-                        : r.status === "pending"
-                          ? "PENDENTE APROVAÇÃO"
-                          : "RECUSADO"}
-                    </Badge>
-                  </div>
-                );
-              })}
-              {myRequests.length === 0 && phoneFilter && (
-                <div className="text-center py-12 text-slate-500 bg-slate-900/20 rounded-2xl border border-dashed border-white/5">
-                  <History size={32} className="mx-auto mb-4 opacity-20" />
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                    Nenhum agendamento encontrado para este telefone
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {step === 1 && (
-              <Card className="glass-card p-6 space-y-4">
-                <h3 className="text-lg font-black text-white italic uppercase flex items-center gap-2">
-                  <Scissors size={20} className="text-elite-red-500" />
-                  Passo 1: Escolha o Serviço
-                </h3>
-                <div className="grid gap-3">
-                  {bookingServices.length === 0 ? (
-                    <div className="text-center py-8 space-y-3">
-                      <div className="h-12 w-12 bg-slate-900 rounded-full flex items-center justify-center mx-auto border border-slate-800">
-                        <Scissors className="text-slate-700" size={24} />
-                      </div>
-                      <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] leading-relaxed max-w-[200px] mx-auto">
-                        Nenhum serviço disponível para agendamento online neste momento.
-                      </p>
-                    </div>
-                  ) : (
-                    bookingServices.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedService(s);
-                          setStep(2);
-                        }}
-                        className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all text-left group cursor-pointer ${selectedService?.id === s.id ? "border-[#E1B15F] bg-[#E1B15F]/10" : "border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900"}`}
-                      >
-                        <div>
-                          <p className="font-extrabold text-white uppercase italic group-hover:text-[#E1B15F] transition-colors">
-                            {s.name}
-                          </p>
-                          <p className="text-slate-400 text-xs flex items-center gap-1 mt-1">
-                            <Clock size={10} className="text-slate-500" /> {s.duration} minutos
-                          </p>
-                        </div>
-                        <p className="font-black text-[#E1B15F] italic text-lg tracking-tight">
-                          R$ {s.price.toFixed(2)}
-                        </p>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </Card>
-            )}
-
-            {step === 2 && (
-              <Card className="glass-card p-6 space-y-6">
-                <button
-                  onClick={() => setStep(1)}
-                  className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 hover:text-[#E1B15F] transition-colors cursor-pointer"
-                >
-                  <Undo2 size={12} /> Voltar para o Passo 1
-                </button>
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2 border-b border-white/5 pb-3">
-                    <Calendar size={20} className="text-elite-red-500" />
-                    <h3 className="text-lg font-black text-white italic uppercase">
-                      Passo 2: Escolha a Data e Horário
-                    </h3>
-                  </div>
-
-                  <div className="space-y-6">
-                    <Input
-                      label="SELECIONE A DATA DESEJADA"
-                      type="date"
-                      value={bookingDate}
-                      onChange={(e) => {
-                        setBookingDate(e.target.value);
-                        setBookingTime("");
-                      }}
-                      required
-                      min={new Date().toISOString().split("T")[0]}
-                    />
-
-                    {bookingDate && (
-                      <div className="space-y-3">
-                        <p className="text-[10px] font-black text-[#E1B15F] uppercase tracking-widest px-1 italic flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce"></span>
-                          Horários disponíveis para dia {bookingDate.split("-").reverse().join("/")}
-                        </p>
-                        {availableSlots.length > 0 ? (
-                          <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                            {availableSlots.map((time) => (
-                              <button
-                                key={time}
-                                type="button"
-                                onClick={() => setBookingTime(time)}
-                                className={`py-3.5 rounded-xl text-xs font-black transition-all cursor-pointer ${bookingTime === time ? "bg-[#E1B15F] text-slate-950 shadow-xl shadow-[#E1B15F]/20 font-black scale-105" : "bg-slate-900 text-white border border-white/5 hover:border-slate-700 hover:bg-slate-900/80"}`}
-                              >
-                                {time}
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="p-8 border-2 border-dashed border-red-500/25 rounded-2xl bg-red-500/5 text-center">
-                            <p className="text-[11px] text-red-500 font-extrabold uppercase italic leading-loose">
-                              Nenhum horário disponível para esta data.
-                              <br />
-                              Por favor, selecione outro dia!
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Resumo & Confirmação Direta se Logado */}
-                {bookingDate && bookingTime && (
-                  <div className="space-y-4 pt-5 border-t border-white/5 animate-in fade-in zoom-in duration-300">
-                    {clientSession ? (
-                      <>
-                        <div className="bg-[#E1B15F]/5 border border-[#E1B15F]/15 rounded-2xl p-4 space-y-3">
-                          <p className="text-[9px] font-black text-[#E1B15F] uppercase tracking-wider">RESUMO DO COMPROMISSO</p>
-                          <div className="space-y-1">
-                            <p className="text-sm font-black text-white italic uppercase">
-                              {selectedService?.name}
-                            </p>
-                            <p className="text-xs text-slate-400 font-bold">
-                              Dia {bookingDate.split("-").reverse().join("/")} às <span className="text-[#E1B15F] font-black">{bookingTime}</span>
-                            </p>
-                            <p className="text-[10px] text-slate-400 font-extrabold mt-1">
-                              Cliente: {clientSession.name}
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          onClick={() => handleSubmitRequest()}
-                          disabled={isSubmitting}
-                          className="w-full py-5 text-sm tracking-[0.2em] font-black italic shadow-2xl transition-all uppercase hover:scale-[1.01] active:scale-95 bg-elite-cyan-600 hover:bg-elite-cyan-500 border-none flex items-center justify-center gap-2"
-                        >
-                          {isSubmitting ? "PROCESSANDO..." : "SOLICITAR AGENDAMENTO AGORA"}
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        disabled={!bookingDate || !bookingTime}
-                        className="w-full py-5 text-xs font-black tracking-[0.2em] italic"
-                        onClick={() => setStep(3)}
-                      >
-                        PROSSEGUIR PARA IDENTIFICAÇÃO
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {step === 3 && !clientSession && (
-              <Card className="glass-card p-6 space-y-6">
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
-                >
-                  <Undo2 size={12} /> Voltar para o Passo 2
-                </button>
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 border-b border-white/5 pb-3">
-                    <UserIcon size={20} className="text-elite-red-500" />
-                    <h3 className="text-lg font-black text-white italic uppercase">
-                      Passo 3: Identifique-se para Agendar
-                    </h3>
-                  </div>
-                  <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">
-                    Seus dados serão <strong className="text-emerald-400">salvos automaticamente</strong> para que seus próximos agendamentos sejam resolvidos em 1 clique!
-                  </p>
-                  
-                  <div className="p-4 bg-elite-cyan-500/5 rounded-2xl border border-white/5 space-y-1.5">
-                    <p className="text-[8px] font-black text-elite-cyan-400 uppercase tracking-widest leading-none">
-                      Resumo Escolhido
-                    </p>
-                    <p className="text-xs font-extrabold text-white uppercase italic">
-                      {selectedService?.name} • R$ {selectedService?.price.toFixed(2)}
-                    </p>
-                    <p className="text-xs text-slate-400 font-bold">
-                      Dia {bookingDate.split("-").reverse().join("/")} às {bookingTime}
-                    </p>
-                  </div>
-
-                  <div className="space-y-4 pt-2">
-                    <Input
-                      label="SEU NOME COMPLETO"
-                      placeholder="Ex: Matheus Farias"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      required
-                    />
-                    <Input
-                      label="SEU WHATSAPP (COM DDD)"
-                      placeholder="Ex: 85999999999"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-                
-                <Button
-                  onClick={() => handleSubmitRequest()}
-                  disabled={isSubmitting || !name.trim() || !phone.trim()}
-                  className="w-full py-5 text-sm tracking-[0.2em] font-black italic shadow-2xl transition-all"
-                >
-                  {isSubmitting ? "PROCESSANDO..." : "SOLICITAR AGENDAMENTO"}
-                </Button>
-              </Card>
-            )}
-          </div>
-        )}
-        <div className="pt-4 border-t border-white/5 mt-8">
-          <WoodenMouseSignature />
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const App: React.FC = () => {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(true);
@@ -921,32 +356,9 @@ const App: React.FC = () => {
         },
       );
 
-      // Add real-time public subscriptions to appointments and requests for the specific barber
-      const unsubAppointments = onSnapshot(
-        collection(db, "users", barberIdFromUrl, "appointments"),
-        (snap) => {
-          setAppointments(snap.docs.map((d) => d.data() as Appointment));
-        },
-        (err) => {
-          console.error("Erro ao carregar agendamentos públicos do barbeiro:", err);
-        }
-      );
-
-      const unsubRequests = onSnapshot(
-        collection(db, "users", barberIdFromUrl, "requests"),
-        (snap) => {
-          setAppointmentRequests(snap.docs.map((d) => d.data()));
-        },
-        (err) => {
-          console.error("Erro ao carregar solicitações públicas do barbeiro:", err);
-        }
-      );
-
       return () => {
         unsubBarber();
         unsubServices();
-        unsubAppointments();
-        unsubRequests();
       };
     }
   }, [barberIdFromUrl]);
@@ -1089,6 +501,11 @@ const App: React.FC = () => {
                 showToast("Dados locais sincronizados com sucesso!", "info");
               }
             });
+          }
+
+          // Sync any offline modifications up to Firestore once online
+          if (localStorage.getItem("force_offline") !== "true" && localStorage.getItem("simdb_has_local_changes") === "true") {
+            syncLocalToCloud(userId);
           }
         } else {
           try {
@@ -1271,7 +688,10 @@ const App: React.FC = () => {
     const chartData = Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
-      const ds = d.toISOString().split("T")[0];
+      const year = d.getFullYear();
+      const month = (d.getMonth() + 1).toString().padStart(2, "0");
+      const day = d.getDate().toString().padStart(2, "0");
+      const ds = `${year}-${month}-${day}`;
       const rev =
         compApts
           .filter((a) => a.date === ds && a.paid)
@@ -1292,7 +712,7 @@ const App: React.FC = () => {
       const monthStr = `${yearPrefix}-${(i + 1).toString().padStart(2, "0")}`;
       const count = compApts.filter((a) => a.date.startsWith(monthStr)).length;
       return {
-        month: new Date(yearPrefix + "-" + (i + 1))
+        month: new Date(parseInt(yearPrefix), i, 1)
           .toLocaleString("pt-BR", { month: "short" })
           .toUpperCase(),
         count: count,
@@ -1781,6 +1201,85 @@ const App: React.FC = () => {
     return migratedAny;
   };
 
+  const syncLocalToCloud = async (userId: string) => {
+    if ((window as any).isSyncingData) return;
+    (window as any).isSyncingData = true;
+
+    try {
+      console.log("Reconciling local offline changes to Firestore...");
+      const collectionsToSync = [
+        "clients",
+        "services",
+        "appointments",
+        "materials",
+        "drinks",
+        "sales",
+        "adjustments",
+        "notifications",
+        "requests",
+      ];
+
+      let syncCount = 0;
+
+      for (const col of collectionsToSync) {
+        const rawLocal = localStorage.getItem(`simdb_users_${userId}_${col}`);
+        if (rawLocal) {
+          try {
+            const items = JSON.parse(rawLocal);
+            if (Array.isArray(items)) {
+              for (const item of items) {
+                if (item && item.id) {
+                  // Write standardly to both Firestore and local simulation
+                  await setDoc(doc(db, "users", userId, col, item.id), item);
+                  syncCount++;
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`Error parsing or syncing collection ${col}:`, err);
+          }
+        }
+      }
+
+      // Process pending deletions made while offline
+      const rawDeletions = localStorage.getItem("simdb_pending_deletions");
+      if (rawDeletions) {
+        try {
+          const pathsToDelete = JSON.parse(rawDeletions);
+          if (Array.isArray(pathsToDelete)) {
+            for (const path of pathsToDelete) {
+              const segments = path.split("/");
+              // Delete standardly from both
+              await deleteDoc(doc(db, ...segments));
+            }
+          }
+        } catch (err) {
+          console.error("Error processing pending deletions:", err);
+        }
+        localStorage.removeItem("simdb_pending_deletions");
+      }
+
+      // Sync user profile settings
+      const rawUser = localStorage.getItem(`simdb_user_${userId}`);
+      if (rawUser) {
+        try {
+          const userData = JSON.parse(rawUser);
+          await setDoc(doc(db, "users", userId), userData, { merge: true });
+        } catch (err) {
+          console.error("Error syncing user profile offline settings:", err);
+        }
+      }
+
+      localStorage.removeItem("simdb_has_local_changes");
+      console.log(`Synchronization complete! Reconciled ${syncCount} items down to cloud database.`);
+      showToast("Alterações offline sincronizadas com o servidor físico!", "success");
+    } catch (err) {
+      console.error("Critical error during cloud data reconciliation:", err);
+    } finally {
+      (window as any).isSyncingData = false;
+    }
+  };
+
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
@@ -2011,21 +1510,20 @@ const App: React.FC = () => {
     return slots;
   };
 
-  const getAvailableSlots = (date: string, service: Service | null, forcedBarber?: any) => {
-    const activeBarber = forcedBarber || bookingBarber || session;
-    if (!activeBarber?.businessHours) return [];
+  const getAvailableSlots = (date: string, service: Service | null) => {
+    if (!session?.businessHours) return [];
     const dayOfWeek = new Date(date).getDay();
-    if (!activeBarber.businessHours.days.includes(dayOfWeek)) return [];
+    if (!session.businessHours.days.includes(dayOfWeek)) return [];
 
     // Check if whole day is unavailable
-    if (activeBarber.unavailableSlots?.some((u: any) => u.date === date)) return [];
+    if (session.unavailableSlots?.some((u) => u.date === date)) return [];
 
     const allSlots = generateTimeSlots(
       date,
-      activeBarber.businessHours.open,
-      activeBarber.businessHours.close,
-      activeBarber.businessHours.intervalStart,
-      activeBarber.businessHours.intervalEnd,
+      session.businessHours.open,
+      session.businessHours.close,
+      session.businessHours.intervalStart,
+      session.businessHours.intervalEnd,
     );
 
     // Filter occupied slots
@@ -2737,6 +2235,563 @@ const App: React.FC = () => {
     }
   };
 
+  const PublicBookingView = () => {
+    const [clientSession, setClientSession] = useState<{ name: string; phone: string } | null>(() => {
+      const savedName = localStorage.getItem("bk_client_name");
+      const savedPhone = localStorage.getItem("bk_client_phone");
+      return savedName && savedPhone ? { name: savedName, phone: savedPhone } : null;
+    });
+
+    const [step, setStep] = useState(1);
+    const [selectedService, setSelectedService] = useState<Service | null>(
+      null,
+    );
+    const [bookingDate, setBookingDate] = useState("");
+    const [bookingTime, setBookingTime] = useState("");
+    const [name, setName] = useState(clientSession?.name || "");
+    const [phone, setPhone] = useState(clientSession?.phone || "");
+    const [phoneFilter, setPhoneFilter] = useState(clientSession?.phone || "");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [viewMode, setViewMode] = useState<"booking" | "my-bookings">(
+      "booking",
+    );
+    const [myRequests, setMyRequests] = useState<any[]>([]);
+
+    // Sync state if clientSession changes
+    useEffect(() => {
+      if (clientSession) {
+        setName(clientSession.name);
+        setPhone(clientSession.phone);
+        setPhoneFilter(clientSession.phone);
+      }
+    }, [clientSession]);
+
+    // Automatically load bookings when switching to "my-bookings" mode
+    useEffect(() => {
+      if (viewMode === "my-bookings" && clientSession?.phone) {
+        setPhoneFilter(clientSession.phone);
+      }
+    }, [viewMode, clientSession]);
+
+    useEffect(() => {
+      if (phoneFilter && barberIdFromUrl) {
+        fetchMyBookings();
+      }
+    }, [phoneFilter, barberIdFromUrl]);
+
+    const fetchMyBookings = async () => {
+      const cleanPhone = phoneFilter.replace(/\D/g, "");
+      if (!cleanPhone || !barberIdFromUrl) return;
+      try {
+        const q = query(
+          collection(db, "users", barberIdFromUrl, "requests"),
+          where("clientPhone", "==", cleanPhone),
+        );
+        onSnapshot(q, (snap) => {
+          setMyRequests(
+            snap.docs
+              .map((d) => d.data())
+              .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+          );
+        });
+      } catch (err) {
+        console.error("Error fetching my bookings:", err);
+      }
+    };
+
+    const handleSubmitRequest = async (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+      
+      const currentName = clientSession ? clientSession.name : name.trim();
+      const currentPhone = clientSession ? clientSession.phone.replace(/\D/g, "") : phone.replace(/\D/g, "");
+
+      if (!selectedService || !barberIdFromUrl || !bookingDate || !bookingTime) {
+        showToast("Por favor, selecione serviço, data e horário.", "error");
+        return;
+      }
+
+      if (!currentName || !currentPhone) {
+        showToast("Por favor, informe seu nome e telefone para realizar o agendamento.", "error");
+        if (!clientSession) setStep(3);
+        return;
+      }
+
+      setIsSubmitting(true);
+
+      // Real-time slot conflict check to guarantee zero scheduling conflicts
+      const updatedAvailableSlots = getAvailableSlots(bookingDate, selectedService);
+      if (!updatedAvailableSlots.includes(bookingTime)) {
+        showToast("Esse horário acaba de ser reservado por outro cliente. Por favor, selecione outro.", "error");
+        setIsSubmitting(false);
+        setBookingTime("");
+        setStep(2); // take back to date/time selection
+        return;
+      }
+
+      const requestId = Date.now().toString();
+      try {
+        await setDoc(doc(db, "users", barberIdFromUrl, "requests", requestId), {
+          id: requestId,
+          serviceId: selectedService.id,
+          date: bookingDate,
+          time: bookingTime,
+          clientName: currentName,
+          clientPhone: currentPhone,
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        });
+
+        // Log the client in locally for premium retention and automatic future flows
+        localStorage.setItem("bk_client_name", currentName);
+        localStorage.setItem("bk_client_phone", currentPhone);
+        setClientSession({ name: currentName, phone: currentPhone });
+
+        setBookingSuccess(true);
+      } catch (err) {
+        console.error("Booking error:", err);
+        alert("Erro ao enviar solicitação de agendamento. Por favor, tente novamente.");
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (bookingSuccess) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+          <Card className="glass-card max-w-sm w-full text-center p-8 space-y-6">
+            <div className="h-20 w-20 bg-elite-cyan-500/20 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2
+                size={40}
+                className="text-elite-cyan-400 animate-bounce"
+              />
+            </div>
+            <h2 className="text-2xl font-black text-white italic uppercase leading-none">
+              Solicitação Enviada!
+            </h2>
+            <p className="text-slate-400 text-sm italic">
+              O barbeiro recebeu seu horário como <strong className="text-amber-400">Pendente</strong> e confirmará via WhatsApp em breve.
+            </p>
+            <Button
+              className="w-full h-12 text-xs font-black tracking-widest"
+              onClick={() => {
+                setBookingSuccess(false);
+                setBookingDate("");
+                setBookingTime("");
+                setSelectedService(null);
+                setStep(1);
+              }}
+            >
+              VOLTAR AO INÍCIO
+            </Button>
+          </Card>
+        </div>
+      );
+    }
+
+    if (bookingError) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+          <Card className="glass-card max-w-sm w-full text-center p-8 space-y-6 border-elite-red-500/50">
+            <div className="h-20 w-20 bg-elite-red-500/20 rounded-full flex items-center justify-center mx-auto">
+              <AlertTriangle size={40} className="text-elite-red-500" />
+            </div>
+            <h2 className="text-xl font-black text-white italic uppercase">
+              {bookingError}
+            </h2>
+            <Button
+              className="w-full h-12"
+              onClick={() =>
+                (window.location.href =
+                  window.location.origin + window.location.pathname)
+              }
+            >
+              TENTAR NOVAMENTE
+            </Button>
+          </Card>
+        </div>
+      );
+    }
+
+    const availableSlots = getAvailableSlots(bookingDate, selectedService);
+
+    if (!bookingBarber)
+      return (
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+          <div className="animate-pulse flex flex-col items-center gap-4">
+            <LogoElite className="h-24 w-24" />
+            <p className="text-elite-cyan-400 font-black tracking-widest text-[10px] uppercase">
+              Buscando Barbeiro...
+            </p>
+          </div>
+        </div>
+      );
+
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 md:p-8 pb-32">
+        <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          
+          {/* Header Bar */}
+          <div className="flex justify-between items-center bg-slate-900/40 p-5 rounded-2xl border border-white/5">
+            <div className="flex-1 space-y-1">
+              <h1 className="text-2xl font-black text-white uppercase italic tracking-tighter leading-none">
+                {bookingBarber.shopName}
+              </h1>
+              <p className="text-elite-cyan-400 text-[9px] font-black uppercase tracking-[0.2em] italic flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Agendamento Online Ativo
+              </p>
+            </div>
+            <button
+              onClick={() =>
+                setViewMode(viewMode === "booking" ? "my-bookings" : "booking")
+              }
+              className="px-4 py-2.5 bg-slate-900 border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest text-[#E1B15F] hover:text-white hover:bg-slate-800 transition-all flex items-center gap-2 cursor-pointer"
+            >
+              <History size={13} />
+              {viewMode === "booking" ? "Meus Pedidos" : "Voltar"}
+            </button>
+          </div>
+
+          {/* Local Contingency Banner showing active backup offline caching */}
+          {localStorage.getItem('force_offline') === 'true' && (
+            <div className="p-4 bg-amber-500/5 border border-amber-500/15 rounded-2xl animate-in slide-in-from-top-2 duration-300">
+              <div className="flex gap-2.5 items-start">
+                <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="text-[10px] uppercase font-black tracking-wider text-amber-500">Backup de Alta Disponibilidade Ativo</p>
+                  <p className="text-[9px] text-slate-400 font-bold leading-normal">
+                    Nosso servidor de banco de dados em nuvem está passando por manutenções de quota temporárias. Ativamos a contingência local para que você agende normalmente: suas solicitações serão gravadas e transmitidas com total segurança!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Persistent Client Credentials Card (com cliente logado e dados salvos) */}
+          {clientSession && viewMode === "booking" && (
+            <div className="flex items-center justify-between p-4 bg-[#E1B15F]/5 border border-[#E1B15F]/15 rounded-2xl animate-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-[#E1B15F]/10 border border-[#E1B15F]/20 rounded-xl flex items-center justify-center text-[#E1B15F] font-black text-sm italic">
+                  {clientSession.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block w-2-h-2 bg-emerald-500 rounded-full"></span>
+                    <p className="text-[9px] font-black text-[#E1B15F] uppercase tracking-wider">Cliente Logado</p>
+                  </div>
+                  <h4 className="text-xs font-black text-white uppercase mt-0.5 leading-none">{clientSession.name}</h4>
+                  <p className="text-[9px] text-slate-500 font-bold tracking-tight mt-1">{clientSession.phone}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.removeItem("bk_client_name");
+                  localStorage.removeItem("bk_client_phone");
+                  setClientSession(null);
+                  setName("");
+                  setPhone("");
+                  showToast("Sessão finalizada! Insira novos dados para agendar.", "info");
+                }}
+                className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/25 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer"
+              >
+                Mudar Cliente
+              </button>
+            </div>
+          )}
+
+          {viewMode === "my-bookings" ? (
+            <div className="space-y-6">
+              <Card className="glass-card p-6 space-y-4">
+                <h3 className="text-lg font-black text-white italic uppercase flex items-center gap-2">
+                  <Search size={20} className="text-[#E1B15F]" />
+                  Consultar Agendamentos
+                </h3>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider leading-relaxed">
+                  Insira o número do celular cadastrado para acompanhar o status (pendente/confirmado/recusado) de suas solicitações em tempo real.
+                </p>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Input
+                      placeholder="Seu Celular (Apenas números)"
+                      value={phoneFilter}
+                      onChange={(e) => setPhoneFilter(e.target.value)}
+                    />
+                  </div>
+                  <Button onClick={fetchMyBookings} className="h-12 px-6 tracking-wider font-extrabold uppercase text-xs">
+                    VERIFICAR
+                  </Button>
+                </div>
+              </Card>
+
+              <div className="space-y-3">
+                {myRequests.map((r) => {
+                  const service = bookingServices.find((s) => s.id === r.serviceId) || services.find((s) => s.id === r.serviceId);
+                  return (
+                    <div
+                      key={r.id}
+                      className="p-5 bg-slate-900/60 rounded-2xl border border-white/5 flex items-center justify-between transition-all hover:bg-slate-900/80"
+                    >
+                      <div>
+                        <p className="text-[10px] text-[#E1B15F] font-black uppercase tracking-widest leading-none mb-1">
+                          {r.date.split("-").reverse().join("/")} • {r.time}
+                        </p>
+                        <p className="text-white font-black italic uppercase text-sm">
+                          {service?.name || "Serviço"}
+                        </p>
+                        <p className="text-[8px] text-slate-500 uppercase tracking-tight mt-1.5">
+                          Para: {r.clientName}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={
+                          r.status === "accepted"
+                            ? "success"
+                            : r.status === "pending"
+                              ? "amber"
+                              : "danger"
+                        }
+                        className={`text-[9px] uppercase tracking-widest px-2.5 py-1 font-extrabold rounded-lg ${
+                          r.status === "pending" ? "bg-amber-500/15 text-amber-500 border border-amber-500/25" : ""
+                        }`}
+                      >
+                        {r.status === "accepted"
+                          ? "CONFIRMADO/ATENDIDO"
+                          : r.status === "pending"
+                            ? "PENDENTE APROVAÇÃO"
+                            : "RECUSADO"}
+                      </Badge>
+                    </div>
+                  );
+                })}
+                {myRequests.length === 0 && phoneFilter && (
+                  <div className="text-center py-12 text-slate-500 bg-slate-900/20 rounded-2xl border border-dashed border-white/5">
+                    <History size={32} className="mx-auto mb-4 opacity-20" />
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Nenhum agendamento encontrado para este telefone
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {step === 1 && (
+                <Card className="glass-card p-6 space-y-4">
+                  <h3 className="text-lg font-black text-white italic uppercase flex items-center gap-2">
+                    <Scissors size={20} className="text-elite-red-500" />
+                    Passo 1: Escolha o Serviço
+                  </h3>
+                  <div className="grid gap-3">
+                    {bookingServices.length === 0 ? (
+                      <div className="text-center py-8 space-y-3">
+                        <div className="h-12 w-12 bg-slate-900 rounded-full flex items-center justify-center mx-auto border border-slate-800">
+                          <Scissors className="text-slate-700" size={24} />
+                        </div>
+                        <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] leading-relaxed max-w-[200px] mx-auto">
+                          Nenhum serviço disponível para agendamento online neste momento.
+                        </p>
+                      </div>
+                    ) : (
+                      bookingServices.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedService(s);
+                            setStep(2);
+                          }}
+                          className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all text-left group cursor-pointer ${selectedService?.id === s.id ? "border-[#E1B15F] bg-[#E1B15F]/10" : "border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900"}`}
+                        >
+                          <div>
+                            <p className="font-extrabold text-white uppercase italic group-hover:text-[#E1B15F] transition-colors">
+                              {s.name}
+                            </p>
+                            <p className="text-slate-400 text-xs flex items-center gap-1 mt-1">
+                              <Clock size={10} className="text-slate-500" /> {s.duration} minutos
+                            </p>
+                          </div>
+                          <p className="font-black text-[#E1B15F] italic text-lg tracking-tight">
+                            R$ {s.price.toFixed(2)}
+                          </p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              {step === 2 && (
+                <Card className="glass-card p-6 space-y-6">
+                  <button
+                    onClick={() => setStep(1)}
+                    className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 hover:text-[#E1B15F] transition-colors cursor-pointer"
+                  >
+                    <Undo2 size={12} /> Voltar para o Passo 1
+                  </button>
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                      <Calendar size={20} className="text-elite-red-500" />
+                      <h3 className="text-lg font-black text-white italic uppercase">
+                        Passo 2: Escolha a Data e Horário
+                      </h3>
+                    </div>
+
+                    <div className="space-y-6">
+                      <Input
+                        label="SELECIONE A DATA DESEJADA"
+                        type="date"
+                        value={bookingDate}
+                        onChange={(e) => {
+                          setBookingDate(e.target.value);
+                          setBookingTime("");
+                        }}
+                        required
+                        min={new Date().toISOString().split("T")[0]}
+                      />
+
+                      {bookingDate && (
+                        <div className="space-y-3">
+                          <p className="text-[10px] font-black text-[#E1B15F] uppercase tracking-widest px-1 italic flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce"></span>
+                            Horários disponíveis para dia {bookingDate.split("-").reverse().join("/")}
+                          </p>
+                          {availableSlots.length > 0 ? (
+                            <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                              {availableSlots.map((time) => (
+                                <button
+                                  key={time}
+                                  type="button"
+                                  onClick={() => setBookingTime(time)}
+                                  className={`py-3.5 rounded-xl text-xs font-black transition-all cursor-pointer ${bookingTime === time ? "bg-[#E1B15F] text-slate-950 shadow-xl shadow-[#E1B15F]/20 font-black scale-105" : "bg-slate-900 text-white border border-white/5 hover:border-slate-700 hover:bg-slate-900/80"}`}
+                                >
+                                  {time}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-8 border-2 border-dashed border-red-500/25 rounded-2xl bg-red-500/5 text-center">
+                              <p className="text-[11px] text-red-500 font-extrabold uppercase italic leading-loose">
+                                Nenhum horário disponível para esta data.
+                                <br />
+                                Por favor, selecione outro dia!
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Dynamic Fast Flow Submission: If logged in, book directly! (com cliente logado e dados salvos) */}
+                  {bookingDate && bookingTime && (
+                    <div className="space-y-4 pt-5 border-t border-white/5 animate-in fade-in zoom-in duration-300">
+                      {clientSession ? (
+                        <>
+                          <div className="bg-[#E1B15F]/5 border border-[#E1B15F]/15 rounded-2xl p-4 space-y-3">
+                            <p className="text-[9px] font-black text-[#E1B15F] uppercase tracking-wider">RESUMO DO COMPROMISSO</p>
+                            <div className="space-y-1">
+                              <p className="text-sm font-black text-white italic uppercase">
+                                {selectedService?.name}
+                              </p>
+                              <p className="text-xs text-slate-400 font-bold">
+                                Dia {bookingDate.split("-").reverse().join("/")} às <span className="text-[#E1B15F] font-black">{bookingTime}</span>
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-extrabold mt-1">
+                                Cliente: {clientSession.name}
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            onClick={() => handleSubmitRequest()}
+                            disabled={isSubmitting}
+                            className="w-full py-5 text-sm tracking-[0.2em] font-black italic shadow-2xl transition-all uppercase hover:scale-[1.01] active:scale-95 bg-elite-cyan-600 hover:bg-elite-cyan-500 border-none flex items-center justify-center gap-2"
+                          >
+                            {isSubmitting ? "PROCESSANDO..." : "SOLICITAR AGENDAMENTO AGORA"}
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          disabled={!bookingDate || !bookingTime}
+                          className="w-full py-5 text-xs font-black tracking-[0.2em] italic"
+                          onClick={() => setStep(3)}
+                        >
+                          PROSSEGUIR PARA IDENTIFICAÇÃO
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {step === 3 && !clientSession && (
+                <Card className="glass-card p-6 space-y-6">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <Undo2 size={12} /> Voltar para o Passo 2
+                  </button>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                      <UserIcon size={20} className="text-elite-red-500" />
+                      <h3 className="text-lg font-black text-white italic uppercase">
+                        Passo 3: Identifique-se para Agendar
+                      </h3>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">
+                      Seus dados serão <strong className="text-emerald-400">salvos automaticamente</strong> para que seus próximos agendamentos sejam resolvidos em 1 clique!
+                    </p>
+                    
+                    <div className="p-4 bg-elite-cyan-500/5 rounded-2xl border border-white/5 space-y-1.5">
+                      <p className="text-[8px] font-black text-elite-cyan-400 uppercase tracking-widest leading-none">
+                        Resumo Escolhido
+                      </p>
+                      <p className="text-xs font-extrabold text-white uppercase italic">
+                        {selectedService?.name} • R$ {selectedService?.price.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-slate-400 font-bold">
+                        Dia {bookingDate.split("-").reverse().join("/")} às {bookingTime}
+                      </p>
+                    </div>
+
+                    <div className="space-y-4 pt-2">
+                      <Input
+                        label="SEU NOME COMPLETO"
+                        placeholder="Ex: Matheus Farias"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                      />
+                      <Input
+                        label="SEU WHATSAPP (COM DDD)"
+                        placeholder="Ex: 85999999999"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  
+                  <Button
+                    onClick={() => handleSubmitRequest()}
+                    disabled={isSubmitting || !name.trim() || !phone.trim()}
+                    className="w-full py-5 text-sm tracking-[0.2em] font-black italic shadow-2xl transition-all"
+                  >
+                    {isSubmitting ? "PROCESSANDO..." : "SOLICITAR AGENDAMENTO"}
+                  </Button>
+                </Card>
+              )}
+            </div>
+          )}
+          <div className="pt-4 border-t border-white/5 mt-8">
+            <WoodenMouseSignature />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
 
   const handleClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2795,21 +2850,7 @@ const App: React.FC = () => {
       </div>
     );
 
-  if (barberIdFromUrl) {
-    return (
-      <PublicBookingView
-        barberIdFromUrl={barberIdFromUrl}
-        bookingBarber={bookingBarber}
-        bookingServices={bookingServices}
-        bookingSuccess={bookingSuccess}
-        setBookingSuccess={setBookingSuccess}
-        bookingError={bookingError}
-        getAvailableSlots={getAvailableSlots}
-        showToast={showToast}
-        services={services}
-      />
-    );
-  }
+  if (barberIdFromUrl) return <PublicBookingView />;
 
   if (!isAuthenticated)
     return (
@@ -3327,9 +3368,25 @@ const App: React.FC = () => {
             >
               <LayoutDashboard size={18} />
             </button>
-            <h2 className="text-sm font-black uppercase tracking-widest text-white">
+            <h2 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-3">
               {activeTab}
             </h2>
+            {localStorage.getItem('force_offline') === 'true' && (
+              <div 
+                onClick={() => {
+                  if (window.confirm("Deseja tentar se reconectar ao banco de dados em nuvem? Os novos dados salvos continuarão disponíveis localmente.")) {
+                    localStorage.removeItem('force_offline');
+                    window.location.reload();
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 text-[9px] font-black uppercase tracking-wider cursor-pointer hover:bg-amber-500/20 transition-all shadow-md shadow-amber-500/5 animate-in fade-in duration-350"
+                title="Modo de Alta Disponibilidade Local Ativo (Servidor em manutenção). Clique para tentar reconectar."
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                <span className="hidden md:inline">Modo Contingência (Local Ativo)</span>
+                <span className="md:hidden">Modo Local</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4">
             {isSaving && (
