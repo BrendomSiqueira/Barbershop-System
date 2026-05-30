@@ -416,6 +416,9 @@ const App: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [marketingMsg, setMarketingMsg] = useState("");
   const [campaignGoal, setCampaignGoal] = useState("");
+  const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReasonText, setRejectReasonText] = useState("");
 
   const [selectedDate, setSelectedDate] = useState(
     new Date().toISOString().split("T")[0],
@@ -1552,7 +1555,11 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => handleRequestAction(req.id, "reject")}
+                        onClick={() => {
+                          setRejectingRequestId(req.id);
+                          setRejectReasonText("");
+                          setShowRejectModal(true);
+                        }}
                         className="p-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl border border-red-500/20 transition-all"
                         title="Recusar"
                       >
@@ -2393,18 +2400,56 @@ const App: React.FC = () => {
           const msg = `Olá ${request.clientName}! Seu agendamento para ${service?.name} no dia ${request.date.split("-").reverse().join("/")} às ${request.time} foi CONFIRMADO. Te esperamos!`;
           sendWhatsAppNotification(request.clientPhone, msg);
         }
+
+        await updateDoc(doc(db, "users", userId, "requests", requestId), {
+          status: "accepted",
+        });
       } else {
         const reason =
           prompt("Motivo da recusa (opcional):") ||
           "Infelizmente não poderemos atender neste horário.";
         const msg = `Olá ${request.clientName}. Sua solicitação de agendamento para ${request.date.split("-").reverse().join("/")} às ${request.time} foi recusada. Motivo: ${reason}`;
+        
+        await updateDoc(doc(db, "users", userId, "requests", requestId), {
+          status: "rejected",
+          rejectReason: reason,
+        });
+
         sendWhatsAppNotification(request.clientPhone, msg);
         showToast("Solicitação recusada", "info");
       }
+    } catch (err) {
+      handleFirestoreError(
+        err,
+        OperationType.UPDATE,
+        `users/${userId}/requests/${requestId}`,
+      );
+    }
+  };
 
+  const handleRejectWithReason = async (requestId: string, reasonText: string) => {
+    if (!auth.currentUser) return;
+    const userId = auth.currentUser.uid;
+    const request = appointmentRequests.find((r) => r.id === requestId);
+    if (!request) return;
+
+    try {
+      const finalReason = reasonText.trim() || "Infelizmente não poderemos atender neste horário.";
+      const service = services.find((s) => s.id === request.serviceId);
+      
+      const msg = `Olá ${request.clientName}. Sua solicitação de agendamento para ${service?.name || "Corte de Cabelo"} no dia ${request.date.split("-").reverse().join("/")} às ${request.time} foi recusada. Motivo: ${finalReason}`;
+      
       await updateDoc(doc(db, "users", userId, "requests", requestId), {
-        status: action === "accept" ? "accepted" : "rejected",
+        status: "rejected",
+        rejectReason: finalReason,
       });
+
+      setShowRejectModal(false);
+      setRejectingRequestId(null);
+      setRejectReasonText("");
+      
+      showToast("Solicitação recusada e atualizada com sucesso!", "info");
+      sendWhatsAppNotification(request.clientPhone, msg);
     } catch (err) {
       handleFirestoreError(
         err,
@@ -2778,6 +2823,122 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Modal para Informar o Motivo da Recusa */}
+      {showRejectModal && rejectingRequestId && (() => {
+        const req = appointmentRequests.find((r) => r.id === rejectingRequestId);
+        if (!req) return null;
+        const service = services.find((s) => s.id === req.serviceId);
+        
+        return (
+          <div className="fixed inset-0 z-[210] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+            <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-[28px] p-8 shadow-[0_0_100px_rgba(239,68,68,0.15)] space-y-6">
+              
+              {/* Header */}
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <span className="text-[10px] text-elite-red-500 font-extrabold uppercase tracking-widest bg-elite-red-500/10 px-3 py-1 rounded-full">
+                    RECUSAR AGENDAMENTO
+                  </span>
+                  <h3 className="text-xl font-black text-white uppercase italic tracking-tight mt-2">
+                    Definir Motivo da Recusa
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRejectModal(false);
+                    setRejectingRequestId(null);
+                  }}
+                  className="p-2 bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white rounded-xl transition-all cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Informações da Solicitação */}
+              <div className="p-4 bg-slate-950/40 border border-white/5 rounded-2xl space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500 font-bold uppercase tracking-wider">Cliente:</span>
+                  <span className="text-white font-extrabold">{req.clientName}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500 font-bold uppercase tracking-wider">Telefone:</span>
+                  <span className="text-white font-mono font-bold">{req.clientPhone}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500 font-bold uppercase tracking-wider">Serviço:</span>
+                  <span className="text-elite-cyan-400 font-black uppercase italic">{service?.name || "Corte de Cabelo"}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500 font-bold uppercase tracking-wider">Data/Hora:</span>
+                  <span className="text-[#E1B15F] font-black">{req.date.split("-").reverse().join("/")} às {req.time}</span>
+                </div>
+              </div>
+
+              {/* Motivos Rápidos */}
+              <div className="space-y-2">
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-wider">
+                  Motivos Rápidos (Clique para usar):
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "Horário não disponível na agenda.",
+                    "Não estaremos funcionando neste horário.",
+                    "Barbearia fechada para folga/feriado.",
+                    "Imprevisto técnico com os equipamentos.",
+                    "Serviço indisponível temporariamente."
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setRejectReasonText(preset)}
+                      className="text-[9px] px-3 py-1.5 bg-slate-800/40 hover:bg-slate-800/80 text-slate-300 hover:text-white rounded-lg border border-white/5 transition-all text-left cursor-pointer font-medium"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Campo de Texto */}
+              <div className="space-y-2">
+                <label className="text-[10px] text-slate-400 font-black uppercase tracking-wider">
+                  Texto do Motivo personalizado (será enviado ao cliente):
+                </label>
+                <textarea
+                  value={rejectReasonText}
+                  onChange={(e) => setRejectReasonText(e.target.value)}
+                  placeholder="Ex: Infelizmente tivemos um imprevisto e não poderemos te atender. Você pode agendar para outro horário?"
+                  className="w-full text-xs font-semibold p-4 shadow-sm text-white bg-slate-950 border border-white/10 rounded-2xl placeholder-slate-600 focus:outline-none focus:border-elite-red-500/50 min-h-[100px] resize-none"
+                />
+              </div>
+
+              {/* Ações */}
+              <div className="flex gap-3 pt-2">
+                <Button
+                  variant="ghost"
+                  className="flex-1 text-slate-400 font-black hover:text-white"
+                  onClick={() => {
+                    setShowRejectModal(false);
+                    setRejectingRequestId(null);
+                  }}
+                >
+                  VOLTAR
+                </Button>
+                <Button
+                  variant="primary"
+                  className="flex-1 py-4 bg-elite-red-500 hover:bg-elite-red-600 text-white font-black"
+                  onClick={() => handleRejectWithReason(req.id, rejectReasonText)}
+                >
+                  RECUSAR E ENVIAR
+                </Button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal de Atualização do Sistema */}
       {showUpdateModal && systemConfig && (
@@ -5654,37 +5815,49 @@ const PublicBookingView: React.FC<PublicBookingViewProps> = ({ barberIdFromUrl }
                 return (
                   <div
                     key={r.id}
-                    className="p-5 bg-slate-900/60 rounded-2xl border border-white/5 flex items-center justify-between transition-all hover:bg-slate-900/80"
+                    className="p-5 bg-slate-900/60 rounded-2xl border border-white/5 space-y-4 transition-all hover:bg-slate-900/80"
                   >
-                    <div>
-                      <p className="text-[10px] text-[#E1B15F] font-black uppercase tracking-widest leading-none mb-1">
-                        {r.date.split("-").reverse().join("/")} • {r.time}
-                      </p>
-                      <p className="text-white font-black italic uppercase text-sm">
-                        {service?.name || "Serviço"}
-                      </p>
-                      <p className="text-[8px] text-slate-500 uppercase tracking-tight mt-1.5">
-                        Para: {r.clientName}
-                      </p>
-                    </div>
-                    <Badge
-                      variant={
-                        r.status === "accepted"
-                          ? "success"
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-[#E1B15F] font-black uppercase tracking-widest leading-none mb-1">
+                          {r.date.split("-").reverse().join("/")} • {r.time}
+                        </p>
+                        <p className="text-white font-black italic uppercase text-sm">
+                          {service?.name || "Serviço"}
+                        </p>
+                        <p className="text-[8px] text-slate-500 uppercase tracking-tight mt-1.5">
+                          Para: {r.clientName}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={
+                          r.status === "accepted"
+                            ? "success"
+                            : r.status === "pending"
+                              ? "amber"
+                              : "danger"
+                        }
+                        className={`text-[9px] uppercase tracking-widest px-2.5 py-1 font-extrabold rounded-lg ${
+                          r.status === "pending" ? "bg-amber-500/15 text-amber-500 border border-amber-500/25" : ""
+                        }`}
+                      >
+                        {r.status === "accepted"
+                          ? "CONFIRMADO/ATENDIDO"
                           : r.status === "pending"
-                            ? "amber"
-                            : "danger"
-                      }
-                      className={`text-[9px] uppercase tracking-widest px-2.5 py-1 font-extrabold rounded-lg ${
-                        r.status === "pending" ? "bg-amber-500/15 text-amber-500 border border-amber-500/25" : ""
-                      }`}
-                    >
-                      {r.status === "accepted"
-                        ? "CONFIRMADO/ATENDIDO"
-                        : r.status === "pending"
-                          ? "PENDENTE APROVAÇÃO"
-                          : "RECUSADO"}
-                    </Badge>
+                            ? "PENDENTE APROVAÇÃO"
+                            : "RECUSADO"}
+                      </Badge>
+                    </div>
+                    {r.status === "rejected" && (
+                      <div className="p-3.5 bg-red-500/5 border border-red-500/20 rounded-xl space-y-1">
+                        <p className="text-[9px] text-red-400 font-extrabold uppercase tracking-wide">
+                          Motivo do Cancelamento/Recusa:
+                        </p>
+                        <p className="text-[11px] text-slate-300 font-bold leading-relaxed">
+                          {r.rejectReason || "Infelizmente não poderemos atender neste horário."}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 );
               })}
