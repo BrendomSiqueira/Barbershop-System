@@ -236,6 +236,27 @@ const getInitialUserData = () => ({
 const getMockCollectionData = (collPath: string): any[] => {
   const raw = localStorage.getItem(`simdb_${collPath}`);
   if (!raw) {
+    const segments = collPath.split('_');
+    const col = segments[segments.length - 1];
+    
+    // Fallback recovery: scan localStorage for legacy barberpro_v2_ documents
+    const keys = Object.keys(localStorage);
+    for (const key of keys) {
+      if (key.startsWith('barberpro_v2_') && key.endsWith(`_${col}`)) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          try {
+            const data = JSON.parse(item);
+            if (Array.isArray(data) && data.length > 0) {
+              console.log(`[Backup System] Legacy recovery restored ${col} from local storage key: ${key}`);
+              saveMockCollectionData(collPath, data);
+              return data;
+            }
+          } catch {}
+        }
+      }
+    }
+
     // Return some initial setup data
     if (collPath.endsWith('_services')) {
       return [
@@ -349,11 +370,37 @@ export async function getDoc(docRef: any) {
       const uId = segments[1];
       const storageKey = uId === 'offline_demo' ? 'simdb_user_offline_demo' : `simdb_user_${uId}`;
       const userData = localStorage.getItem(storageKey);
-      const val = userData ? JSON.parse(userData) : {
-        ...getInitialUserData(),
-        username: uId,
-        shopName: uId === 'matheus_farias' ? 'Barbearia Matheus Farias' : `Barbearia de ${uId.replace(/_/g, ' ')}`,
-      };
+      
+      let val;
+      if (userData) {
+        val = JSON.parse(userData);
+      } else {
+        let marketing_msg = "";
+        let campaign_goal = "";
+        
+        // Scan for legacy values to recover
+        const keys = Object.keys(localStorage);
+        for (const key of keys) {
+          if (key.startsWith('barberpro_v2_')) {
+            if (key.endsWith('_marketing_msg')) {
+              try { marketing_msg = JSON.parse(localStorage.getItem(key) || '""') || ''; } catch {}
+            }
+            if (key.endsWith('_campaign_goal')) {
+              try { campaign_goal = JSON.parse(localStorage.getItem(key) || '""') || ''; } catch {}
+            }
+          }
+        }
+
+        val = {
+          ...getInitialUserData(),
+          username: uId === 'matheus_farias' ? 'Matheus Farias' : uId,
+          shopName: uId === 'matheus_farias' ? 'Barbearia Matheus Farias' : `Barbearia de ${uId.replace(/_/g, ' ')}`,
+          marketing_msg,
+          campaign_goal,
+        };
+        localStorage.setItem(storageKey, JSON.stringify(val));
+      }
+
       return {
         exists: () => true,
         data: () => val
